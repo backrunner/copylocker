@@ -1,0 +1,27 @@
+# Build and package output
+target/
+dist/
+build/
+release/
+*.node
+**/gen/schemas/
+
+# Local fuzz state; durable corpus storage is managed separately.
+/fuzz/artifacts/
+/fuzz/corpus/
+
+# JavaScript and Cloudflare local state
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+
+# Local browser QA state and screenshots
+/.playwright-cli/
+/output/
+
+# Local environment and OS files
+.env
+.env.*
+!.env.example
+.DS_Store
