@@ -45,7 +45,7 @@ for (const buildPath of buildPaths) {
   const asarPath = join(resources, 'app.asar')
   await access(executable)
   await access(asarPath)
-  const renderer = statFile(asarPath, 'dist/renderer/index.html')
+  const renderer = statFile(asarPath, join('dist', 'renderer', 'index.html'))
   if (renderer.unpacked) throw new Error('Renderer entry must remain inside app.asar')
   const nativeBinding = await findNativeBinding(join(resources, 'app.asar.unpacked'))
   await flipFuses(executable, {
