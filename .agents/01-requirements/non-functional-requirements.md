@@ -97,7 +97,7 @@
 | NFR-COMP-003 | 支持 Cloudflare Data Localization Suite 的区域约束配置指引 |
 | NFR-COMP-004 | 提供隐私政策模板与 DPA 模板供 Vendor 复用 |
 | NFR-COMP-005 | 密码学选型可出具 PQC 迁移说明（用于客户的合规问卷） |
-| NFR-COMP-006 | 开源许可清晰：Apache-2.0 OR MIT；依赖许可通过 `cargo-deny` 白名单管控 |
+| NFR-COMP-006 | 公开仓库使用 `GPL-3.0-only`；私有实现独立仓库/商业许可；组合分发需法律审查；依赖许可通过 `cargo-deny` 管控 |
 | NFR-COMP-007 | **T0 分析零额外采集**：默认分析能力不引入任何超出授权协议必需的字段 |
 | NFR-COMP-008 | **`legal-sync` CI 门禁**：采集字段 schema 单一来源 → 自动生成数据清单 → 不一致即失败 |
 | NFR-COMP-009 | IP 地址仅用于限流，**不落库、不入分析** |

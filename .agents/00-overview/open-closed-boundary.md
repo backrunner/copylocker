@@ -14,7 +14,7 @@
 ## 2. 仓库拆分
 
 ```
-github.com/<org>/copylocker                 [Public, Apache-2.0 OR MIT]
+github.com/<org>/copylocker                 [Public, GPL-3.0-only]
 ├── crates/copylocker-types
 ├── crates/copylocker-suite          ← trait 定义（槽位契约）
 ├── crates/copylocker-suite-std      ← CL-STD-1 开源参考套件
@@ -32,9 +32,10 @@ github.com/<org>/copylocker                 [Public, Apache-2.0 OR MIT]
 ├── crates/copylocker-ffi
 ├── crates/copylocker-cli
 ├── packages/web | electron | tauri | unplugin | guard | admin-sdk
-└── .agents/                          ← 本文档目录（公开）
+├── .agents/                          ← 本文档与仓库级 skills（公开）
+└── private/copylocker-suite-priv     ← 可选 submodule gitlink；默认不初始化
 
-git.<internal>/copylocker-suite-priv        [Private, 商业许可]
+git.<internal>/<org>/copylocker-suite-priv  [Private, 商业许可；独立仓库]
 ├── crates/copylocker-suite-priv     ← CL-PRIV-1 实现，仅依赖 copylocker-suite + copylocker-types
 ├── crates/copylocker-suite-priv-gen ← 厂商参数生成器（vendor seed → suite params）
 ├── vectors/                          ← 内部 KAT（不公开）
@@ -44,10 +45,13 @@ git.<internal>/copylocker-suite-priv        [Private, 商业许可]
 ### 关键约束
 
 1. **依赖方向单向**：`copylocker-suite-priv` → `copylocker-suite`（公开）。
-   公开仓库**不得**在任何地方引用私有 crate 的名字、类型、feature。
+   公开源码、默认 manifest 与 lockfile **不得**依赖私有 crate；边界文档与可选 submodule
+   gitlink 可以标明其位置。
 2. 公开仓库必须能**独立**编译、测试、运行、发布，CI 不接触私有仓库。
 3. 私有仓库有独立 CI，跑「与公开 trait 契约的一致性测试套件」（`copylocker-suite-testkit`，公开）。
-4. 私有 crate 通过**私有 registry**（Cloudflare R2 + `cargo-registry` 或 Git 依赖 + deploy key）分发。
+4. 私有仓库固定挂载到 `private/copylocker-suite-priv`；未获授权的开发环境不初始化 submodule。
+5. 私有 crate 通过私有 registry 或 submodule path 仅进入获授权的组合构建，不进入公开 release job。
+6. submodule 只提供源码与访问控制隔离，不改变 GPL 对组合分发的判断。
 
 ## 3. 槽位契约（Slot Contract）
 
@@ -90,16 +94,37 @@ pub trait CryptoSuite: Send + Sync + 'static {
 
 | 组件 | 许可 |
 |---|---|
-| 公开仓库全部代码 | `Apache-2.0 OR MIT`（Rust 生态惯例） |
-| 文档 `.agents/` | `CC-BY-4.0` |
+| 公开仓库全部原创代码与文档 | `GPL-3.0-only` |
 | `copylocker-suite-priv` | 商业许可，按 Vendor 授权，含厂商专属参数种子 |
 | 托管服务（未来） | 订阅制 |
 
 **销售命题**：开源版本足以让你上线并保证安全；私有套件版本让攻击者无法复用别人的破解成果。
 
+### GPL 与私有组合分发
+
+- submodule、私有 registry 或单向依赖都不会自动形成 GPL linking exception。
+- 向第三方分发包含私有 crate 的单一二进制前，必须选择以下路径之一：取得公开组件的
+  独立商业许可、把私有能力隔离为独立进程/服务，或经法律审查确认完整履行 GPL 义务。
+- 仅内部使用或由 CopyLocker 托管、不向客户交付私有二进制的模式仍须由适用法律与合同确认。
+- 详细政策见仓库根目录 `LICENSING.md`。这不是法律意见。
+
 ## 6. 构建时的组装方式
 
-使用者的应用侧 `Cargo.toml`：
+公开 checkout 不初始化私有 submodule，且默认 `Cargo.toml` 只使用公开套件：
+
+```bash
+git clone https://github.com/<org>/copylocker.git
+cargo test --workspace
+```
+
+取得私有仓库权限且其真实 remote 已写入 `.gitmodules` 后，授权构建可显式初始化：
+
+```bash
+git submodule update --init --recursive private/copylocker-suite-priv
+```
+
+私有仓库维护自己的组合构建 manifest；不得把私有依赖写回公开 workspace。概念上的应用侧
+选择如下：
 
 ```toml
 [dependencies]

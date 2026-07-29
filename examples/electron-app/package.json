@@ -2,6 +2,7 @@
   "name": "copylocker-electron-example",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0-only",
   "description": "Secure CopyLocker Electron integration example.",
   "main": "dist/electron/main.cjs",
   "scripts": {

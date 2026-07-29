@@ -2,6 +2,7 @@
   "name": "__COPYLOCKER_PROJECT_NAME__",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "check": "wrangler deploy --dry-run --outfile .copylocker/dry-run.js",

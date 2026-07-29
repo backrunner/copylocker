@@ -30,7 +30,7 @@
     "typescript": "7.0.2",
     "vitest": "4.1.10"
   },
-  "license": "Apache-2.0 OR MIT",
+  "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/copylocker/copylocker.git",

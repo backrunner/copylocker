@@ -148,12 +148,16 @@ vendor_seed (256 bit, 每个 Vendor 唯一, 由我们生成并交付)
 | Fuzz | `PrivCodec` 的解析入口必须 fuzz |
 | 审计 | 每个 major 版本做一次内部密码学自审；红线检查表逐条签字 |
 | 版本 | 与公开仓库同版本号；trait 变更时同步升级 |
-| 分发 | 私有 cargo registry（R2 + `cargo-registry` 兼容）或 Git + deploy key |
+| 仓库 | 独立私有仓库；在授权 checkout 中挂载为 `private/copylocker-suite-priv` submodule |
+| 分发 | 私有 cargo registry、受控 submodule path 或 Git + deploy key；不得进入公开 release job |
+| 许可 | 专有商业许可；与 GPL 公开代码组合分发前必须完成商业许可或法律审查 |
 
 ## 6. 使用方式（对 Vendor）
 
+以下依赖只存在于私有仓库维护的组合构建 manifest，不写入公开 workspace：
+
 ```toml
-# Cargo.toml
+# private build overlay Cargo.toml
 [dependencies]
 copylocker-client = "1"
 copylocker-suite-priv = { version = "1", registry = "copylocker-private" }
@@ -165,6 +169,9 @@ let client = CopyLockerClient::<Suite>::new(config)?;
 ```
 
 服务端同样改一行。**切换成本 = 改类型别名 + 重新签发所有凭证**（AC-12）。
+
+submodule 仅隔离仓库访问，不改变组合二进制的 GPL 义务。向第三方分发前必须遵循
+`LICENSING.md` 的组合分发策略。
 
 ### 迁移（CL-STD-1 → CL-PRIV-1）
 

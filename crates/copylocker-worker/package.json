@@ -2,6 +2,7 @@
   "name": "@copylocker/worker-runtime-tests",
   "version": "0.1.0",
   "private": true,
+  "license": "GPL-3.0-only",
   "type": "module",
   "scripts": {
     "build": "worker-build --profile worker-release && node ../../scripts/prepare-worker-package.mjs",
