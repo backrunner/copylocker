@@ -1,0 +1,119 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "__COPYLOCKER_PROJECT_NAME__",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      { "name": "LICENSE", "class_name": "LicenseDO" },
+      { "name": "ACCOUNT", "class_name": "AccountDO" },
+      { "name": "ISSUER", "class_name": "IssuerDO" },
+      { "name": "ADMIN_AUDIT", "class_name": "AdminAuditDO" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LicenseDO", "AccountDO", "IssuerDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["AdminAuditDO"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "__COPYLOCKER_PROJECT_NAME__",
+      "database_id": "__COPYLOCKER_D1_DATABASE_ID__",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "__COPYLOCKER_KV_NAMESPACE_ID__"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARCHIVE",
+      "bucket_name": "__COPYLOCKER_PROJECT_NAME__-archive"
+    }
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "EPOCH_SIGNING_KEY",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "EPOCH_SIGNING_KEY"
+    },
+    {
+      "binding": "EPOCH_FAST_SIGNING_KEY",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "EPOCH_FAST_SIGNING_KEY"
+    },
+    {
+      "binding": "SERVER_PEPPER",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "SERVER_PEPPER"
+    },
+    {
+      "binding": "ADMIN_TOKEN_PEPPER",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "ADMIN_TOKEN_PEPPER"
+    },
+    {
+      "binding": "VARIANT_PARAMS_KEY",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "VARIANT_PARAMS_KEY"
+    },
+    {
+      "binding": "ASSET_KEK_KEY",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "ASSET_KEK_KEY"
+    },
+    {
+      "binding": "STRIPE_WEBHOOK_SECRET",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "STRIPE_WEBHOOK_SECRET"
+    },
+    {
+      "binding": "PADDLE_WEBHOOK_SECRET",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "PADDLE_WEBHOOK_SECRET"
+    },
+    {
+      "binding": "LEMONSQUEEZY_WEBHOOK_SECRET",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "LEMONSQUEEZY_WEBHOOK_SECRET"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "EVENTS", "queue": "__COPYLOCKER_PROJECT_NAME__-events" }
+    ],
+    "consumers": [
+      {
+        "queue": "__COPYLOCKER_PROJECT_NAME__-events",
+        "max_batch_size": 100,
+        "max_batch_timeout": 1,
+        "max_retries": 10,
+        "max_concurrency": 1,
+        "dead_letter_queue": "__COPYLOCKER_PROJECT_NAME__-events-dlq"
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "ENVIRONMENT": "production"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  }
+}

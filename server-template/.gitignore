@@ -1,0 +1,5 @@
+node_modules/
+.copylocker/
+.wrangler/
+.dev.vars
+.dev.vars.*

@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "project_name": "__COPYLOCKER_PROJECT_NAME__",
+  "product_id": "__COPYLOCKER_PRODUCT_ID__",
+  "secret_store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+  "api_url": __COPYLOCKER_API_URL_JSON__,
+  "admin_token_env": "COPYLOCKER_ADMIN_TOKEN"
+}

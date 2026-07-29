@@ -1,0 +1,19 @@
+{
+  "name": "__COPYLOCKER_PROJECT_NAME__",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "wrangler deploy --dry-run --outfile .copylocker/dry-run.js",
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev",
+    "migrate:local": "wrangler d1 migrations apply __COPYLOCKER_PROJECT_NAME__ --local",
+    "migrate:remote": "wrangler d1 migrations apply __COPYLOCKER_PROJECT_NAME__ --remote"
+  },
+  "dependencies": {
+    "copylocker-worker": "0.1.0"
+  },
+  "devDependencies": {
+    "wrangler": "4.114.0"
+  }
+}
