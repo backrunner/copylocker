@@ -1,0 +1,18 @@
+[package]
+name = "copylocker-fingerprint"
+description = "Deterministic, privacy-auditable desktop fingerprint providers for CopyLocker."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+copylocker-suite = { workspace = true, features = ["std"] }
+copylocker-types = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,26 @@
+[package]
+name = "copylocker-core"
+description = "CopyLocker client domain core: state machine, clock guard, feature key derivation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = ["copylocker-proto/std", "copylocker-suite/std", "copylocker-types/std"]
+
+[dependencies]
+copylocker-types = { workspace = true }
+copylocker-suite = { workspace = true }
+copylocker-proto = { workspace = true }
+zeroize = { workspace = true, features = ["alloc"] }
+
+[dev-dependencies]
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }
+rand_chacha = { workspace = true }
+rand_core = { workspace = true }
+
+[lints]
+workspace = true

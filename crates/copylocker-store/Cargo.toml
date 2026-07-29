@@ -1,0 +1,32 @@
+[package]
+name = "copylocker-store"
+description = "Variant-independent, device-bound secure storage for CopyLocker desktop clients."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["keychain"]
+keychain = ["dep:keyring", "dep:security-framework"]
+file-only = []
+
+[dependencies]
+copylocker-suite = { workspace = true, features = ["std"] }
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }
+getrandom = { workspace = true }
+tempfile = { workspace = true }
+zeroize = { workspace = true, features = ["alloc"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = { workspace = true, optional = true, features = ["OSX_10_15"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { workspace = true, optional = true, features = ["windows-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { workspace = true, optional = true, features = ["linux-native-sync-persistent", "crypto-rust", "vendored"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,36 @@
+[package]
+name = "copylocker-client"
+description = "Async desktop facade for CopyLocker activation, validation, secure storage, and scheduling."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["transport-reqwest"]
+transport-reqwest = ["dep:reqwest"]
+
+[dependencies]
+copylocker-core = { workspace = true, features = ["std"] }
+copylocker-fingerprint = { workspace = true }
+copylocker-proto = { workspace = true, features = ["std"] }
+copylocker-store = { workspace = true }
+copylocker-suite = { workspace = true, features = ["std"] }
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }
+copylocker-types = { workspace = true, features = ["std"] }
+futures-util = { workspace = true }
+getrandom = { workspace = true }
+reqwest = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["rt", "sync", "time"] }
+url = { workspace = true }
+zeroize = { workspace = true, features = ["alloc"] }
+
+[dev-dependencies]
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65", "deterministic-rng"] }
+rand_chacha = { workspace = true }
+rand_core = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "test-util"] }
+
+[lints]
+workspace = true
