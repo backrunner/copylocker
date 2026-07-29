@@ -1,0 +1,123 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "copylocker",
+  "main": "build/worker/shim.mjs",
+  "compatibility_date": "2026-07-22",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "build": {
+    "command": "npm run build",
+    "watch_dir": ["src", "../copylocker-server-core/src"]
+  },
+  "durable_objects": {
+    "bindings": [
+      { "name": "LICENSE", "class_name": "LicenseDO" },
+      { "name": "ACCOUNT", "class_name": "AccountDO" },
+      { "name": "ISSUER", "class_name": "IssuerDO" },
+      { "name": "ADMIN_AUDIT", "class_name": "AdminAuditDO" }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["LicenseDO", "AccountDO", "IssuerDO"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["AdminAuditDO"]
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "copylocker",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "00000000000000000000000000000001"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "ARCHIVE",
+      "bucket_name": "copylocker-archive"
+    }
+  ],
+  "secrets_store_secrets": [
+    {
+      "binding": "EPOCH_SIGNING_KEY",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "EPOCH_SIGNING_KEY"
+    },
+    {
+      "binding": "EPOCH_FAST_SIGNING_KEY",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "EPOCH_FAST_SIGNING_KEY"
+    },
+    {
+      "binding": "SERVER_PEPPER",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "SERVER_PEPPER"
+    },
+    {
+      "binding": "ADMIN_TOKEN_PEPPER",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "ADMIN_TOKEN_PEPPER"
+    },
+    {
+      "binding": "VARIANT_PARAMS_KEY",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "VARIANT_PARAMS_KEY"
+    },
+    {
+      "binding": "ASSET_KEK_KEY",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "ASSET_KEK_KEY"
+    },
+    {
+      "binding": "STRIPE_WEBHOOK_SECRET",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "STRIPE_WEBHOOK_SECRET"
+    },
+    {
+      "binding": "PADDLE_WEBHOOK_SECRET",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "PADDLE_WEBHOOK_SECRET"
+    },
+    {
+      "binding": "LEMONSQUEEZY_WEBHOOK_SECRET",
+      "store_id": "00000000000000000000000000000002",
+      "secret_name": "LEMONSQUEEZY_WEBHOOK_SECRET"
+    }
+  ],
+  "queues": {
+    "producers": [
+      { "binding": "EVENTS", "queue": "copylocker-events" }
+    ],
+    "consumers": [
+      {
+        "queue": "copylocker-events",
+        "max_batch_size": 100,
+        "max_batch_timeout": 1,
+        "max_retries": 10,
+        "max_concurrency": 1,
+        "dead_letter_queue": "copylocker-events-dlq"
+      }
+    ]
+  },
+  "triggers": {
+    "crons": ["* * * * *"]
+  },
+  "vars": {
+    "ENVIRONMENT": "development"
+  },
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1 },
+    "traces": { "enabled": true, "head_sampling_rate": 0.01 }
+  }
+}

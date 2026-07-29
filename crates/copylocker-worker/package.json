@@ -1,0 +1,29 @@
+{
+  "name": "@copylocker/worker-runtime-tests",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "worker-build --profile worker-release && node ../../scripts/prepare-worker-package.mjs",
+    "cf-types": "wrangler types",
+    "check": "tsc --noEmit",
+    "package:check": "npm run build && node ../../scripts/check-worker-package.mjs",
+    "pretest": "npm run build",
+    "test": "vitest run",
+    "size": "bash ../../scripts/check-worker-wasm-size.sh",
+    "startup": "node ../../scripts/check-worker-startup.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "0.18.8",
+    "@cloudflare/workers-types": "5.20260727.1",
+    "@types/node": "26.1.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10",
+    "wrangler": "4.114.0"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260722.1": true,
+    "fsevents": false
+  }
+}

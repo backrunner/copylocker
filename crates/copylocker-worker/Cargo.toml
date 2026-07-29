@@ -1,0 +1,34 @@
+[package]
+name = "copylocker-worker"
+description = "Cloudflare Workers adapter for the CopyLocker license server."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+copylocker-core = { workspace = true }
+copylocker-proto = { workspace = true }
+copylocker-server-core = { workspace = true, features = ["serde"] }
+copylocker-suite = { workspace = true }
+copylocker-suite-std = { workspace = true, features = ["pq-ml-dsa-65"] }
+copylocker-types = { workspace = true, features = ["serde"] }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_bytes = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+zeroize = { workspace = true }
+worker = { workspace = true }
+web-sys = { version = "0.3.102", features = ["Crypto"] }
+futures-util = { workspace = true }
+flate2 = { workspace = true }
+brotli = { workspace = true }
+
+[lints]
+workspace = true

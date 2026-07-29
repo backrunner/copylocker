@@ -1,0 +1,29 @@
+[package]
+name = "copylocker-server-core"
+description = "CopyLocker server domain logic: entitlements, policy, subscriptions, activation."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = ["copylocker-proto/std", "copylocker-suite/std", "copylocker-types/std"]
+# Serde derives for the catalog and policy documents the CLI and console exchange.
+serde = ["dep:serde", "copylocker-types/serde"]
+
+[dependencies]
+copylocker-types = { workspace = true }
+copylocker-suite = { workspace = true }
+copylocker-proto = { workspace = true }
+serde = { workspace = true, features = ["derive", "alloc"], optional = true }
+
+[dev-dependencies]
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }
+rand_chacha = { workspace = true }
+rand_core = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true
