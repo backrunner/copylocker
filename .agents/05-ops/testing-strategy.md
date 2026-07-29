@@ -232,6 +232,13 @@ CI 矩阵：`macos-latest`、`windows-latest`、`ubuntu-latest`（+ musl 容器�
 | Root → Epoch → MC（Node + Wasm，平均 / P95） | 1.006 / 1.197 ms | P95 ≤ 15 ms |
 | 同一路径 Wasm 体积（raw / gzip） | 170,243 / 71,974 B | gzip ≤ 307,200 B |
 
+`pq` harness 默认使用 `apple-m4-reference` 档位，并继续执行签名 3 ms、验签 5 ms 的产品
+门限。GitHub quality job 固定在 `ubuntu-24.04` 并显式设置
+`COPYLOCKER_PERF_PROFILE=github-ubuntu-24.04`；该共享 runner 档位只执行签名 12 ms、验签
+8 ms 的宽松回归上限。公开 CI run `30491510629` 在未区分硬件时实测 7.835 / 3.163 ms，
+而同一提交在 Apple M4 上复测为 1.730 / 0.234 ms。共享 runner 结果不能替代 Apple M4
+产品门限或未来稳定基准机的发布证据；调整任一档位都必须记录机器、原始样本和原因。
+
 Wasm harness 执行真实 Root → Epoch → MachineCredential 链验证，不是空导出或算法 stub。
 复现命令：
 

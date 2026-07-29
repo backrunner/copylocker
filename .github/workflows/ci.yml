@@ -14,7 +14,7 @@ env:
 jobs:
   quality:
     name: Test, lint, and KAT
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust toolchain
@@ -31,7 +31,9 @@ jobs:
         run: cargo check --locked -p copylocker-server-core --all-features
       - name: Test workspace
         run: cargo test --workspace --locked
-      - name: Enforce native crypto performance budget
+      - name: Enforce shared-runner crypto regression ceiling
+        env:
+          COPYLOCKER_PERF_PROFILE: github-ubuntu-24.04
         run: cargo bench --locked -p copylocker-suite-std --bench pq
       - name: Check committed KAT
         run: cargo run --locked --quiet -p copylocker-cli -- kat check --file vectors/CL-STD-1/kat.json
