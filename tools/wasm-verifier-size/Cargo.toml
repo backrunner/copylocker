@@ -1,0 +1,25 @@
+[package]
+name = "copylocker-wasm-verifier-size"
+description = "Non-published harness for the M0 browser verification size gate."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+copylocker-proto = { workspace = true }
+copylocker-suite = { workspace = true }
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }
+copylocker-types = { workspace = true }
+
+[build-dependencies]
+hex = { workspace = true, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

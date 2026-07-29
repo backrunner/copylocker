@@ -1,0 +1,24 @@
+[package]
+name = "copylocker-suite-testkit"
+description = "Conformance harness every CopyLocker crypto suite must pass, plus the KAT loader."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+copylocker-types = { workspace = true }
+copylocker-suite = { workspace = true }
+copylocker-proto = { workspace = true }
+rand_chacha = { workspace = true }
+rand_core = { workspace = true }
+hex = { workspace = true, features = ["alloc"] }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[dev-dependencies]
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }
+
+[lints]
+workspace = true

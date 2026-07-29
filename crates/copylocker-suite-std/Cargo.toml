@@ -1,0 +1,49 @@
+[package]
+name = "copylocker-suite-std"
+description = "CL-STD-1: the open reference crypto suite for CopyLocker."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std", "pq-ml-dsa-65"]
+std = ["copylocker-suite/std", "copylocker-types/std", "blake3/std"]
+deterministic-rng = ["dep:rand_chacha"]
+
+# ML-DSA parameter set. Exactly one must be enabled; the build fails otherwise.
+pq-ml-dsa-44 = []
+pq-ml-dsa-65 = []
+pq-ml-dsa-87 = []
+
+[dependencies]
+copylocker-types = { workspace = true }
+copylocker-suite = { workspace = true }
+
+ed25519-dalek = { workspace = true, features = ["alloc", "zeroize"] }
+ml-dsa = { workspace = true, features = ["alloc"] }
+x-wing = { workspace = true, features = ["zeroize"] }
+chacha20poly1305 = { workspace = true, features = ["alloc"] }
+hkdf = { workspace = true }
+hmac = { workspace = true }
+sha2 = { workspace = true }
+blake3 = { workspace = true }
+argon2 = { workspace = true, features = ["alloc"] }
+zeroize = { workspace = true, features = ["alloc"] }
+subtle = { workspace = true }
+rand_core = { workspace = true }
+# Only reachable through the `deterministic-rng` feature; see `test_rng`.
+rand_chacha = { workspace = true, optional = true }
+
+[dev-dependencies]
+copylocker-suite-testkit = { workspace = true }
+rand_chacha = { workspace = true }
+hex = { workspace = true, features = ["alloc"] }
+
+[[bench]]
+name = "pq"
+harness = false
+
+[lints]
+workspace = true

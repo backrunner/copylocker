@@ -1,0 +1,20 @@
+[package]
+name = "copylocker-suite"
+description = "Crypto-agility slot contracts for CopyLocker. Traits only, no implementations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = ["copylocker-types/std"]
+
+[dependencies]
+copylocker-types = { workspace = true }
+zeroize = { workspace = true, features = ["alloc", "derive"] }
+subtle = { workspace = true }
+
+[lints]
+workspace = true

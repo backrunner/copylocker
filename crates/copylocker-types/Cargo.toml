@@ -1,0 +1,20 @@
+[package]
+name = "copylocker-types"
+description = "Shared data types for CopyLocker. no_std + alloc, no logic."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = ["std"]
+std = []
+serde = ["dep:serde"]
+
+[dependencies]
+serde = { workspace = true, features = ["derive", "alloc"], optional = true }
+zeroize = { workspace = true, features = ["alloc", "derive"] }
+
+[lints]
+workspace = true

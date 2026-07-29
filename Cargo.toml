@@ -1,0 +1,131 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/copylocker-types",
+    "crates/copylocker-suite",
+    "crates/copylocker-suite-std",
+    "crates/copylocker-suite-testkit",
+    "crates/copylocker-proto",
+    "crates/copylocker-core",
+    "crates/copylocker-fingerprint",
+    "crates/copylocker-store",
+    "crates/copylocker-client",
+    "crates/copylocker-tauri",
+    "crates/copylocker-node",
+    "crates/copylocker-ffi",
+    "crates/copylocker-server-core",
+    "crates/copylocker-worker",
+    "crates/copylocker-cli",
+    "tools/wasm-verifier-size",
+]
+exclude = ["examples/tauri-app/src-tauri"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0 OR MIT"
+repository = "https://github.com/copylocker/copylocker"
+homepage = "https://copylocker.dev"
+
+# Unified version across all crates and npm packages (00-crate-layout.md §6).
+[workspace.dependencies]
+copylocker-types = { path = "crates/copylocker-types", version = "0.1.0", default-features = false }
+copylocker-suite = { path = "crates/copylocker-suite", version = "0.1.0", default-features = false }
+copylocker-suite-std = { path = "crates/copylocker-suite-std", version = "0.1.0", default-features = false }
+copylocker-suite-testkit = { path = "crates/copylocker-suite-testkit", version = "0.1.0", default-features = false }
+copylocker-proto = { path = "crates/copylocker-proto", version = "0.1.0", default-features = false }
+copylocker-core = { path = "crates/copylocker-core", version = "0.1.0", default-features = false }
+copylocker-fingerprint = { path = "crates/copylocker-fingerprint", version = "0.1.0" }
+copylocker-store = { path = "crates/copylocker-store", version = "0.1.0" }
+copylocker-client = { path = "crates/copylocker-client", version = "0.1.0" }
+copylocker-server-core = { path = "crates/copylocker-server-core", version = "0.1.0", default-features = false }
+
+# --- crypto ---
+ed25519-dalek = { version = "3.0", default-features = false }
+ml-dsa = { version = "0.1", default-features = false }
+x-wing = { version = "0.1", default-features = false }
+chacha20poly1305 = { version = "0.11", default-features = false }
+hkdf = { version = "0.13", default-features = false }
+hmac = { version = "0.13", default-features = false }
+sha2 = { version = "0.11", default-features = false }
+blake3 = { version = "1.5", default-features = false }
+argon2 = { version = "0.6.0-rc.8", default-features = false }
+rand_core = { version = "0.10", default-features = false }
+rand_chacha = { version = "0.10", default-features = false }
+getrandom = "0.3"
+zeroize = { version = "1.8", default-features = false }
+subtle = { version = "2.6", default-features = false }
+keyring = { version = "3.6.3", default-features = false }
+security-framework = { version = "3.7", default-features = false }
+tempfile = "3.27"
+object = { version = "0.39.1", default-features = false, features = ["read", "std"] }
+
+# --- encoding ---
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+minicbor = { version = "2.1", default-features = false }
+serde = { version = "1", default-features = false }
+serde_bytes = "0.11.19"
+serde_json = { version = "1", default-features = false }
+reqwest = { version = "0.13.1", default-features = false, features = ["blocking", "json", "rustls", "stream"] }
+worker = { version = "0.8.5", features = ["d1", "queue"] }
+futures-util = "0.3.33"
+tokio = { version = "1.53.1", default-features = false }
+url = "2.5"
+flate2 = { version = "1.1.9", default-features = false, features = ["rust_backend"] }
+brotli = "8.0.4"
+
+# --- cli / host-only ---
+clap = { version = "4.5", features = ["derive"] }
+anyhow = "1"
+hex = { version = "0.4", default-features = false }
+log = "0.4"
+napi = { version = "=3.4.0", default-features = false, features = ["async", "dyn-symbols", "napi8"] }
+napi-derive = { version = "=3.2.5", default-features = false, features = ["strict", "type-def"] }
+napi-build = { version = "=2.2.4" }
+tauri = { version = "=2.11.5", default-features = false }
+tauri-plugin = { version = "=2.6.3", default-features = false }
+ts-rs = { version = "=12.0.1", default-features = false, features = ["serde-compat"] }
+cbindgen = "=0.29.2"
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+# 10-server-worker.md §4 — never panic. Enforced crate-wide; the few unavoidable
+# sites carry an explicit `#[allow]` with a justification comment.
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+indexing_slicing = "warn"
+todo = "deny"
+unimplemented = "deny"
+
+# 00-crate-layout.md §5 — release profile.
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+overflow-checks = true # ★ security-relevant: keep overflow checks on
+
+[profile.release.package."*"]
+opt-level = "z"
+
+# `strip = "symbols"` removes Wasm's `target_features` custom section, which
+# wasm-bindgen needs for its externref transform. Keep the global release
+# profile unchanged and preserve that section only for the Worker build.
+[profile.worker-release]
+inherits = "release"
+strip = "debuginfo"
+
+# FFI entrypoints catch unwinds before they can cross the C ABI boundary.
+[profile.ffi-release]
+inherits = "release"
+panic = "unwind"
+
+# Tests need unwinding; keep the security-relevant overflow checks.
+[profile.test]
+overflow-checks = true
