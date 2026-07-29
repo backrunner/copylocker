@@ -1,0 +1,52 @@
+{
+  "name": "@copylocker/node",
+  "version": "0.1.0",
+  "description": "CopyLocker native Node-API module for Electron main processes.",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "loader.js",
+    "*.node"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "napi build --platform --release --no-js --dts index.d.ts",
+    "build:debug": "napi build --platform --no-js --dts index.d.ts",
+    "test": "node --test test/*.test.cjs",
+    "prepack": "npm run build && npm test"
+  },
+  "napi": {
+    "binaryName": "copylocker",
+    "targets": [
+      "aarch64-apple-darwin",
+      "x86_64-apple-darwin",
+      "aarch64-pc-windows-msvc",
+      "x86_64-pc-windows-msvc",
+      "aarch64-unknown-linux-gnu",
+      "x86_64-unknown-linux-gnu",
+      "x86_64-unknown-linux-musl"
+    ]
+  },
+  "optionalDependencies": {
+    "@copylocker/node-darwin-arm64": "0.1.0",
+    "@copylocker/node-darwin-x64": "0.1.0",
+    "@copylocker/node-linux-arm64-gnu": "0.1.0",
+    "@copylocker/node-linux-x64-gnu": "0.1.0",
+    "@copylocker/node-linux-x64-musl": "0.1.0",
+    "@copylocker/node-win32-arm64-msvc": "0.1.0",
+    "@copylocker/node-win32-x64-msvc": "0.1.0"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "3.4.1"
+  },
+  "license": "Apache-2.0 OR MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "crates/copylocker-node"
+  }
+}

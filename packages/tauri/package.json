@@ -1,0 +1,39 @@
+{
+  "name": "@copylocker/tauri",
+  "version": "0.1.0",
+  "description": "Type-safe Tauri v2 bindings for CopyLocker.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "sync:types": "node scripts/sync-types.mjs",
+    "build": "npm run sync:types && tsc -p tsconfig.json",
+    "check": "npm run sync:types && tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "license": "Apache-2.0 OR MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "packages/tauri"
+  }
+}

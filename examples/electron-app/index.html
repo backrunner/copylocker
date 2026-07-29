@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'"
+    />
+    <link rel="icon" href="/copylocker-seal.svg" type="image/svg+xml" />
+    <title>CopyLocker Native Lab</title>
+    <script type="module" src="/src/renderer/main.ts"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/copylocker-seal.svg" alt="" width="44" height="44" />
+        <div>
+          <strong>CopyLocker</strong>
+          <span>Native Lab / Electron</span>
+        </div>
+      </div>
+      <div class="state-line" aria-live="polite">
+        <span class="state-dot" id="state-dot"></span>
+        <span id="state-name">connecting</span>
+      </div>
+    </header>
+
+    <main>
+      <aside class="identity-pane">
+        <img class="seal" src="/copylocker-seal.svg" alt="CopyLocker geometric seal" />
+        <div class="identity-copy">
+          <span class="kicker">DESKTOP CLIENT 02</span>
+          <h1>License operations</h1>
+        </div>
+        <dl>
+          <div><dt>Runtime</dt><dd>Electron</dd></div>
+          <div><dt>Suite</dt><dd>CL-STD-1</dd></div>
+          <div><dt>State</dt><dd id="state-detail">Connecting</dd></div>
+        </dl>
+        <button class="quiet" id="deactivate" type="button">Deactivate</button>
+      </aside>
+
+      <section class="workbench" aria-label="CopyLocker operations">
+        <nav class="tabs" aria-label="Operation mode">
+          <button class="tab active" type="button" data-tab="activation">Activation</button>
+          <button class="tab" type="button" data-tab="protected">Protected data</button>
+        </nav>
+
+        <div class="tab-panel active" data-panel="activation">
+          <form id="activate-form" class="primary-form">
+            <label for="license-key">License key</label>
+            <div class="input-action">
+              <input id="license-key" name="key" autocomplete="off" required />
+              <button type="submit">Activate</button>
+            </div>
+          </form>
+
+          <div class="operation-grid">
+            <section class="operation">
+              <div><span class="step">01</span><h2>Offline request</h2></div>
+              <button id="offline-request" type="button">Export request</button>
+            </section>
+            <section class="operation">
+              <div><span class="step">02</span><h2>Offline response</h2></div>
+              <label class="file-button">Import response<input id="offline-import" type="file" /></label>
+            </section>
+            <section class="operation wide">
+              <div><span class="step">03</span><h2>Offline License Key</h2></div>
+              <label class="file-button">Import OLK<input id="olk-import" type="file" accept="text/plain" /></label>
+            </section>
+          </div>
+        </div>
+
+        <div class="tab-panel" data-panel="protected" hidden>
+          <form id="unseal-form" class="asset-form">
+            <div>
+              <label for="feature">Feature</label>
+              <input id="feature" value="pro-config" required />
+            </div>
+            <div>
+              <label for="sealed-file">Sealed asset</label>
+              <input id="sealed-file" type="file" required />
+            </div>
+            <button type="submit">Unseal asset</button>
+          </form>
+        </div>
+
+        <footer class="activity" aria-live="polite">
+          <span>Activity</span>
+          <output id="activity">Ready</output>
+        </footer>
+      </section>
+    </main>
+  </body>
+</html>

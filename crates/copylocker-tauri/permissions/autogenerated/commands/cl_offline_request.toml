@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-cl-offline-request"
+description = "Enables the cl_offline_request command without any pre-configured scope."
+commands.allow = ["cl_offline_request"]
+
+[[permission]]
+identifier = "deny-cl-offline-request"
+description = "Denies the cl_offline_request command without any pre-configured scope."
+commands.deny = ["cl_offline_request"]

@@ -1,0 +1,11 @@
+{
+  "name": "@copylocker/node-linux-arm64-gnu",
+  "version": "0.1.0",
+  "os": ["linux"],
+  "cpu": ["arm64"],
+  "libc": ["glibc"],
+  "main": "copylocker.linux-arm64-gnu.node",
+  "files": ["copylocker.linux-arm64-gnu.node"],
+  "engines": { "node": ">=20" },
+  "license": "Apache-2.0 OR MIT"
+}

@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-state"
+description = "Allows the advisory CopyLocker state command."
+commands.allow = ["cl_state"]

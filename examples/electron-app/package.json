@@ -1,0 +1,30 @@
+{
+  "name": "copylocker-electron-example",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Secure CopyLocker Electron integration example.",
+  "main": "dist/electron/main.cjs",
+  "scripts": {
+    "generate": "node scripts/generate-config.mjs",
+    "check": "npm run generate && tsc --noEmit",
+    "test": "node --test",
+    "build": "npm run check && node scripts/build-electron.mjs && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 1421",
+    "start": "npm run build && electron .",
+    "package": "npm run build && node scripts/package.mjs"
+  },
+  "dependencies": {
+    "@copylocker/electron": "file:../../packages/electron",
+    "@copylocker/node": "file:../../crates/copylocker-node"
+  },
+  "devDependencies": {
+    "@electron/asar": "4.2.1",
+    "@electron/fuses": "2.1.3",
+    "@electron/packager": "20.0.4",
+    "@types/node": "26.1.2",
+    "electron": "43.2.0",
+    "esbuild": "0.28.1",
+    "typescript": "7.0.2",
+    "vite": "7.3.6"
+  }
+}

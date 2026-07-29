@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-cl-activate"
+description = "Enables the cl_activate command without any pre-configured scope."
+commands.allow = ["cl_activate"]
+
+[[permission]]
+identifier = "deny-cl-activate"
+description = "Denies the cl_activate command without any pre-configured scope."
+commands.deny = ["cl_activate"]

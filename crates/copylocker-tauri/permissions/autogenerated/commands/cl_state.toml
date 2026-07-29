@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-cl-state"
+description = "Enables the cl_state command without any pre-configured scope."
+commands.allow = ["cl_state"]
+
+[[permission]]
+identifier = "deny-cl-state"
+description = "Denies the cl_state command without any pre-configured scope."
+commands.deny = ["cl_state"]

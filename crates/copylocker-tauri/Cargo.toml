@@ -1,0 +1,30 @@
+[package]
+name = "tauri-plugin-copylocker"
+description = "Tauri v2 plugin for CopyLocker productive licensing operations."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+links = "tauri-plugin-copylocker"
+
+[dependencies]
+blake3 = { workspace = true, features = ["std"] }
+copylocker-client = { workspace = true }
+copylocker-core = { workspace = true, features = ["std"] }
+copylocker-proto = { workspace = true, features = ["std"] }
+copylocker-suite = { workspace = true, features = ["std"] }
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }
+copylocker-types = { workspace = true, features = ["std"] }
+futures-util = { workspace = true }
+log = { workspace = true }
+object = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+tauri = { workspace = true }
+ts-rs = { workspace = true }
+
+[build-dependencies]
+tauri-plugin = { workspace = true, features = ["build"] }
+
+[lints]
+workspace = true

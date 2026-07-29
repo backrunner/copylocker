@@ -1,0 +1,51 @@
+{
+  "name": "@copylocker/electron",
+  "version": "0.1.0",
+  "description": "Secure Electron main-process and contextBridge integration for CopyLocker.",
+  "type": "commonjs",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    "./main": {
+      "types": "./dist/main/index.d.ts",
+      "require": "./dist/main/index.js",
+      "default": "./dist/main/index.js"
+    },
+    "./preload": {
+      "types": "./dist/preload/index.d.ts",
+      "require": "./dist/preload/index.js",
+      "default": "./dist/preload/index.js"
+    },
+    "./renderer": {
+      "types": "./dist/renderer/index.d.ts",
+      "require": "./dist/renderer/index.js",
+      "default": "./dist/renderer/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build && npm test"
+  },
+  "peerDependencies": {
+    "@copylocker/node": "0.1.0",
+    "electron": ">=30"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "license": "Apache-2.0 OR MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "packages/electron"
+  }
+}

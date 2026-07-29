@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-unseal"
+description = "Allows productive asset unsealing and opaque feature challenges."
+commands.allow = ["cl_unseal", "cl_challenge"]

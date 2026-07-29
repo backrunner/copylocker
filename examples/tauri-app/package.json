@@ -1,0 +1,20 @@
+{
+  "name": "copylocker-tauri-example",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420",
+    "build": "tsc --noEmit && vite build",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@copylocker/tauri": "file:../../packages/tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.4",
+    "@types/node": "26.1.2",
+    "typescript": "7.0.2",
+    "vite": "7.3.6"
+  }
+}

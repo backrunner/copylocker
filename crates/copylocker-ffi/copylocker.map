@@ -1,0 +1,16 @@
+COPYLOCKER_0.1 {
+    global:
+        cl_activate;
+        cl_challenge;
+        cl_create;
+        cl_deactivate;
+        cl_destroy;
+        cl_free_buf;
+        cl_import_olk;
+        cl_offline_import;
+        cl_offline_request;
+        cl_state;
+        cl_unseal;
+    local:
+        *;
+};

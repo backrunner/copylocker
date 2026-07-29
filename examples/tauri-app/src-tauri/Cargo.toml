@@ -1,0 +1,16 @@
+[package]
+name = "copylocker-tauri-example"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+copylocker-suite-std = { path = "../../../crates/copylocker-suite-std", default-features = false, features = ["std", "pq-ml-dsa-65"] }
+tauri = { version = "=2.11.5" }
+tauri-plugin-copylocker = { path = "../../../crates/copylocker-tauri" }
+
+[build-dependencies]
+hex = "0.4"
+serde_json = "1"
+tauri-build = "=2.6.3"

@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-cl-challenge"
+description = "Enables the cl_challenge command without any pre-configured scope."
+commands.allow = ["cl_challenge"]
+
+[[permission]]
+identifier = "deny-cl-challenge"
+description = "Denies the cl_challenge command without any pre-configured scope."
+commands.deny = ["cl_challenge"]

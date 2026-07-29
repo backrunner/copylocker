@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-cl-import-olk"
+description = "Enables the cl_import_olk command without any pre-configured scope."
+commands.allow = ["cl_import_olk"]
+
+[[permission]]
+identifier = "deny-cl-import-olk"
+description = "Denies the cl_import_olk command without any pre-configured scope."
+commands.deny = ["cl_import_olk"]

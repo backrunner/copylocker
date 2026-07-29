@@ -1,0 +1,10 @@
+[[permission]]
+identifier = "allow-activation"
+description = "Allows activation, deactivation, and offline credential lifecycle commands."
+commands.allow = [
+    "cl_activate",
+    "cl_deactivate",
+    "cl_offline_request",
+    "cl_offline_import",
+    "cl_import_olk",
+]
