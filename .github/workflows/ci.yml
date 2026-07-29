@@ -16,7 +16,7 @@ jobs:
     name: Test, lint, and KAT
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal --component rustfmt,clippy
       - name: Install Linux desktop dependencies
@@ -46,7 +46,7 @@ jobs:
       matrix:
         parameter-set: [44, 65, 87]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal
       - name: Test parameter set
@@ -62,7 +62,7 @@ jobs:
       matrix:
         target: [x86_64-unknown-linux-gnu, wasm32-unknown-unknown]
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal --target ${{ matrix.target }}
       - name: Check core crates without std
@@ -85,8 +85,8 @@ jobs:
       run:
         working-directory: crates/copylocker-worker
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 26
           cache: npm
@@ -114,7 +114,7 @@ jobs:
     name: WASM verification size
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
       - name: Enforce M0 gzip budget
@@ -126,7 +126,7 @@ jobs:
     name: Supply-chain policy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.96.0 --profile minimal
       - name: Install audit tools
