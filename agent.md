@@ -18,7 +18,9 @@ repository boundary, accepted risk, or immediate plan.
 - Proprietary code belongs in a second access-controlled repository named
   `copylocker-suite-priv`.
 - The reserved mount point is `private/copylocker-suite-priv` as an optional Git submodule.
-- The real submodule is not configured yet because no private remote URL has been supplied.
+- The public remote is `https://github.com/backrunner/copylocker`; the private remote is
+  `https://github.com/backrunner/copylocker-suite-priv`.
+- `.gitmodules` uses `../copylocker-suite-priv.git` and currently pins private commit `faec029`.
 - Public source, default manifests, lockfiles, CI, tests, and releases must work without the
   private submodule.
 - Never copy private source, private KATs, vendor parameters, credentials, or private build output
@@ -39,7 +41,7 @@ repository boundary, accepted risk, or immediate plan.
 | Native platform evidence | Partially complete | Three-OS CI matrix exists; current checkout was validated on macOS, remote matrix evidence remains required |
 | M3 Web SDK | Not implemented | Only the browser verifier size/performance harness exists |
 | M4 build tooling | Not implemented | unplugin, guard, seal packages remain roadmap work |
-| M5 private suite and release variants | Not implemented | Private repository and submodule remote are not yet created/configured |
+| M5 private suite and release variants | Repository scaffold complete; implementation not started | Private remote, proprietary notice, and submodule gitlink exist; suite code and authorized CI remain pending |
 | M6 analytics and telemetry | Not implemented | Roadmap only |
 | M7 admin console | Not implemented | Roadmap only |
 | M8 GA | Not complete | External audit, red team, legal review, provenance and production operations remain |
@@ -67,14 +69,15 @@ repository boundary, accepted risk, or immediate plan.
   remains a transitive Linux runtime risk.
 - `copylocker-worker@0.1.0` and `@copylocker/node@0.1.0` are not in their public registries. Local
   tarballs validate artifacts but are not evidence of registry availability.
-- The private repository URL, access policy, commercial license, and submodule gitlink are pending.
+- The private repository and submodule exist, but formal commercial license terms, authorized
+  integration CI, and private suite implementation remain pending.
 - GPL/private combined-distribution policy requires qualified legal review before a private binary
   is delivered to customers.
 
 ## Immediate Plan
 
-1. Create the access-controlled `copylocker-suite-priv` remote, add its proprietary license and CI,
-   then mount it at `private/copylocker-suite-priv` with a relative or canonical authenticated URL.
+1. Implement the private suite and independent CI in `copylocker-suite-priv`, then formalize its
+   commercial license terms and collaborator access policy.
 2. Preserve a public CI path that does not initialize the private submodule; add a separate
    authorized integration pipeline in the private repository.
 3. Close remaining M0-M2 evidence: remote Linux/Windows/macOS matrix, sustained fuzzing, memory

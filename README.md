@@ -19,10 +19,11 @@ mutation journals.
 This public repository is licensed under `GPL-3.0-only`; see [LICENSE](LICENSE) and
 [LICENSING.md](LICENSING.md). Third-party dependencies retain their own licenses.
 
-The proprietary `copylocker-suite-priv` implementation belongs in a separate access-controlled
-repository. Once its real remote is configured, authorized checkouts mount it as the optional
-`private/copylocker-suite-priv` submodule. The public workspace and public CI must remain fully
-functional without that submodule.
+The proprietary `copylocker-suite-priv` implementation belongs in the private
+[`BackRunner/copylocker-suite-priv`](https://github.com/BackRunner/copylocker-suite-priv)
+repository. Authorized checkouts mount it as the optional `private/copylocker-suite-priv`
+submodule. The public workspace and public CI must remain fully functional without that
+submodule.
 
 A submodule does not create a GPL linking exception. Distributing a combined binary containing
 proprietary code requires a separate commercial license, process/service isolation, or legal

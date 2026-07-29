@@ -14,7 +14,7 @@
 ## 2. 仓库拆分
 
 ```
-github.com/<org>/copylocker                 [Public, GPL-3.0-only]
+github.com/BackRunner/copylocker            [Public, GPL-3.0-only]
 ├── crates/copylocker-types
 ├── crates/copylocker-suite          ← trait 定义（槽位契约）
 ├── crates/copylocker-suite-std      ← CL-STD-1 开源参考套件
@@ -35,7 +35,7 @@ github.com/<org>/copylocker                 [Public, GPL-3.0-only]
 ├── .agents/                          ← 本文档与仓库级 skills（公开）
 └── private/copylocker-suite-priv     ← 可选 submodule gitlink；默认不初始化
 
-git.<internal>/<org>/copylocker-suite-priv  [Private, 商业许可；独立仓库]
+github.com/BackRunner/copylocker-suite-priv [Private, 商业许可；独立仓库，目标布局]
 ├── crates/copylocker-suite-priv     ← CL-PRIV-1 实现，仅依赖 copylocker-suite + copylocker-types
 ├── crates/copylocker-suite-priv-gen ← 厂商参数生成器（vendor seed → suite params）
 ├── vectors/                          ← 内部 KAT（不公开）
@@ -113,11 +113,11 @@ pub trait CryptoSuite: Send + Sync + 'static {
 公开 checkout 不初始化私有 submodule，且默认 `Cargo.toml` 只使用公开套件：
 
 ```bash
-git clone https://github.com/<org>/copylocker.git
+git clone https://github.com/BackRunner/copylocker.git
 cargo test --workspace
 ```
 
-取得私有仓库权限且其真实 remote 已写入 `.gitmodules` 后，授权构建可显式初始化：
+取得私有仓库权限后，授权构建可显式初始化：
 
 ```bash
 git submodule update --init --recursive private/copylocker-suite-priv

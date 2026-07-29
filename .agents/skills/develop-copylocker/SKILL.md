@@ -27,9 +27,11 @@ tests, public vectors, documentation, and public CI.
 Use the private `copylocker-suite-priv` repository for proprietary suite code, vendor parameters,
 private vectors, internal design notes, and authorized integration pipelines.
 
-Reserve `private/copylocker-suite-priv` as the public checkout's optional submodule mount point.
-Do not invent a submodule URL. Add the gitlink only after the real access-controlled remote exists.
-The public build and CI must pass with the submodule absent and uninitialized.
+Use `private/copylocker-suite-priv` as the public checkout's optional submodule mount point. The
+private remote is `https://github.com/backrunner/copylocker-suite-priv`, and `.gitmodules` stores
+the protocol-neutral relative URL `../copylocker-suite-priv.git`. Do not replace it with a local
+filesystem URL or embed credentials. The public build and CI must pass with the submodule absent
+and uninitialized.
 
 Never place these in the public repository:
 
