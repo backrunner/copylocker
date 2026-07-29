@@ -1,0 +1,119 @@
+name: Native SDK CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  native-sdk:
+    name: Native SDK (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, windows-2022, ubuntu-24.04]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            crates/copylocker-node/package-lock.json
+            packages/tauri/package-lock.json
+            packages/electron/package-lock.json
+            examples/tauri-app/package-lock.json
+            examples/electron-app/package-lock.json
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --component clippy
+      - name: Install Linux desktop dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - name: Test C ABI
+        run: cargo test --locked -p copylocker-ffi
+      - name: Build C ABI release artifacts
+        run: cargo build --locked -p copylocker-ffi --profile ffi-release
+      - name: Verify generated C header is committed
+        run: git diff --exit-code -- crates/copylocker-ffi/include/copylocker.h
+      - name: Compile C header
+        run: clang -std=c11 -Wall -Wextra -Werror -fsyntax-only -include crates/copylocker-ffi/include/copylocker.h -x c -
+      - name: Compile C++ header
+        run: clang++ -std=c++17 -Wall -Wextra -Werror -fsyntax-only -include crates/copylocker-ffi/include/copylocker.h -x c++ -
+
+      - name: Install Node binding build tools
+        working-directory: crates/copylocker-node
+        run: npm ci --ignore-scripts --omit=optional
+      - name: Build current-platform Node binding
+        working-directory: crates/copylocker-node
+        run: npm run build
+      - name: Test real Node binding load
+        working-directory: crates/copylocker-node
+        run: npm test
+      - name: Audit Node binding package
+        working-directory: crates/copylocker-node
+        run: npm audit --audit-level=high
+      - name: Dry-run Node binding package
+        working-directory: crates/copylocker-node
+        run: npm pack --dry-run
+
+      - name: Check Tauri Rust plugin
+        run: cargo clippy --locked -p tauri-plugin-copylocker --all-targets -- -D warnings
+      - name: Install Tauri JavaScript package
+        working-directory: packages/tauri
+        run: npm ci --ignore-scripts
+      - name: Check and test Tauri JavaScript package
+        working-directory: packages/tauri
+        run: npm run check && npm test && npm audit --audit-level=high
+      - name: Build Tauri JavaScript package
+        working-directory: packages/tauri
+        run: npm run build
+      - name: Dry-run Tauri JavaScript package
+        working-directory: packages/tauri
+        run: npm pack --dry-run
+      - name: Install Tauri example
+        working-directory: examples/tauri-app
+        run: npm ci --ignore-scripts
+      - name: Build Tauri example renderer
+        working-directory: examples/tauri-app
+        run: npm run build
+      - name: Check Tauri example host
+        run: cargo check --locked --manifest-path examples/tauri-app/src-tauri/Cargo.toml
+      - name: Audit Tauri example
+        working-directory: examples/tauri-app
+        run: npm audit --audit-level=high
+
+      - name: Install Electron package
+        working-directory: packages/electron
+        run: npm ci --ignore-scripts --legacy-peer-deps
+      - name: Check and test Electron package
+        working-directory: packages/electron
+        run: npm run check && npm test && npm audit --audit-level=high
+      - name: Build Electron package
+        working-directory: packages/electron
+        run: npm run build
+      - name: Dry-run Electron package
+        working-directory: packages/electron
+        run: npm pack --dry-run
+      - name: Install Electron example
+        working-directory: examples/electron-app
+        run: npm ci --ignore-scripts
+      - name: Test Electron example security policy
+        working-directory: examples/electron-app
+        run: npm run check && npm test && npm audit --audit-level=high
+      - name: Package Electron example with ASAR and fuses
+        working-directory: examples/electron-app
+        run: npm run package

@@ -1,0 +1,133 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  quality:
+    name: Test, lint, and KAT
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --component rustfmt,clippy
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Check server configuration features
+        run: cargo check --locked -p copylocker-server-core --all-features
+      - name: Test workspace
+        run: cargo test --workspace --locked
+      - name: Enforce native crypto performance budget
+        run: cargo bench --locked -p copylocker-suite-std --bench pq
+      - name: Check committed KAT
+        run: cargo run --locked --quiet -p copylocker-cli -- kat check --file vectors/CL-STD-1/kat.json
+      - name: Check architecture boundaries
+        run: bash scripts/check-architecture.sh
+
+  suite-matrix:
+    name: ML-DSA-${{ matrix.parameter-set }} conformance
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        parameter-set: [44, 65, 87]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Test parameter set
+        run: >-
+          cargo test --locked -p copylocker-suite-std --no-default-features
+          --features std,pq-ml-dsa-${{ matrix.parameter-set }}
+
+  no-std:
+    name: no_std (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [x86_64-unknown-linux-gnu, wasm32-unknown-unknown]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --target ${{ matrix.target }}
+      - name: Check core crates without std
+        run: >-
+          cargo check --locked
+          -p copylocker-types
+          -p copylocker-suite
+          -p copylocker-suite-std
+          -p copylocker-proto
+          -p copylocker-core
+          -p copylocker-server-core
+          --target ${{ matrix.target }}
+          --no-default-features
+          --features copylocker-suite-std/pq-ml-dsa-65
+
+  worker-runtime:
+    name: Worker runtime and size
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crates/copylocker-worker
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: crates/copylocker-worker/package-lock.json
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      - name: Install Worker build tool
+        run: cargo install --locked worker-build@0.8.5
+      - name: Install locked JavaScript dependencies
+        run: npm ci --ignore-scripts
+      - name: Enable audited native build tools
+        run: npm rebuild esbuild workerd
+      - name: Type-check Worker tests
+        run: npm run check
+      - name: Validate npm runtime package and generated-server template
+        run: bash ../../scripts/check-server-template.sh
+      - name: Run Workerd integration tests
+        run: npm test
+      - name: Enforce Worker release gzip budget
+        run: npm run size
+      - name: Enforce local Worker startup budget
+        run: npm run startup
+
+  wasm-size:
+    name: WASM verification size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      - name: Enforce M0 gzip budget
+        run: bash scripts/check-wasm-size.sh
+      - name: Enforce browser verification budget
+        run: node scripts/bench-wasm-verifier.mjs
+
+  supply-chain:
+    name: Supply-chain policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal
+      - name: Install audit tools
+        run: cargo install --locked cargo-audit cargo-deny
+      - name: Dependency policy
+        run: cargo deny --locked check advisories bans licenses sources
+      - name: Vulnerability audit
+        run: cargo audit --deny warnings

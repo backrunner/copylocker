@@ -1,0 +1,38 @@
+name: Fuzz
+
+on:
+  pull_request:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 255
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - fuzz_decode_cbor
+          - fuzz_decode_envelope
+          - fuzz_decode_artifacts
+          - fuzz_license_key_parse
+          - fuzz_core_handle
+          - fuzz_server_activate
+          - fuzz_server_validate
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install nightly Rust
+        run: rustup toolchain install nightly --profile minimal
+      - name: Install cargo-fuzz
+        run: cargo +nightly install --locked cargo-fuzz
+      - name: Fuzz
+        working-directory: fuzz
+        env:
+          FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '14400' || '60' }}
+        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time="$FUZZ_SECONDS" -max_len=65536
