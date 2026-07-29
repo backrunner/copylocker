@@ -16,6 +16,7 @@
 7. [`02-architecture/protocol-spec.md`](02-architecture/protocol-spec.md) — 协议与凭证格式
 8. [`03-modules/`](03-modules/) — 各模块设计
 9. [`04-roadmap/roadmap.md`](04-roadmap/roadmap.md) — 路线图
+10. [`skills/develop-copylocker/SKILL.md`](skills/develop-copylocker/SKILL.md) — 开发、验证、许可与提交规范
 
 ## 目录索引
 
@@ -102,6 +103,12 @@
 |---|---|
 | [privacy-and-legal-pack.md](06-legal/privacy-and-legal-pack.md) | 数据清单、法律基础、同意管理、DSR、模板清单 |
 
+### Repository skill
+
+| Skill | 内容 |
+|---|---|
+| [develop-copylocker](skills/develop-copylocker/SKILL.md) | 公开/私有仓库边界、开发流程、安全护栏、发布门禁、英文提交规范 |
+
 ## 核心设计要点速查
 
 如果只读五条，读这五条：
@@ -119,4 +126,4 @@
 - **`entitlements` 只在 [`licensing-model.md §9`](02-architecture/licensing-model.md) 定义。**
 - 任何影响跨模块契约的选择必须写 ADR，编号递增，状态 `Proposed | Accepted | Superseded`。
 - 密码学改动必须同步更新 `crypto-architecture.md` + `protocol-spec.md`，并补 KAT 向量。
-- 本目录是**给人和 AI agent 共同阅读的规格来源**；代码与文档冲突时以文档为准，或先改文档。
+- 本目录是**给人和 AI agent 共同阅读的规格来源**；规范性设计与实现不得漂移。若路线图状态落后于已测试实现，以根目录 `agent.md` 记录当前事实，并在同一变更中同步相关文档。
