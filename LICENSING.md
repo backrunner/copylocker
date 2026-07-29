@@ -19,9 +19,9 @@ checkouts may mount that repository at:
 private/copylocker-suite-priv
 ```
 
-The actual submodule entry must not be added until the real private repository URL and access
-policy are available. The public workspace, lockfiles, release artifacts, and CI must not require
-the submodule.
+The submodule is configured with the relative GitHub URL `../copylocker-suite-priv.git`; repository
+access controls determine who can initialize it. The public workspace, lockfiles, release
+artifacts, and CI must not require the submodule.
 
 ## Combined Distribution
 
