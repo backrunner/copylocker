@@ -1,0 +1,68 @@
+[package]
+name = "copylocker-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+copylocker-suite = { path = "../crates/copylocker-suite", default-features = false }
+copylocker-proto = { path = "../crates/copylocker-proto", default-features = false }
+copylocker-types = { path = "../crates/copylocker-types", default-features = false }
+copylocker-core = { path = "../crates/copylocker-core", default-features = false }
+copylocker-server-core = { path = "../crates/copylocker-server-core", default-features = false }
+
+[[bin]]
+name = "fuzz_decode_cbor"
+path = "fuzz_targets/fuzz_decode_cbor.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_decode_envelope"
+path = "fuzz_targets/fuzz_decode_envelope.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_decode_artifacts"
+path = "fuzz_targets/fuzz_decode_artifacts.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_license_key_parse"
+path = "fuzz_targets/fuzz_license_key_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_core_handle"
+path = "fuzz_targets/fuzz_core_handle.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_server_activate"
+path = "fuzz_targets/fuzz_server_activate.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_server_validate"
+path = "fuzz_targets/fuzz_server_validate.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
+members = ["."]
