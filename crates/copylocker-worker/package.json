@@ -7,6 +7,7 @@
   "scripts": {
     "build": "worker-build --profile worker-release && node ../../scripts/prepare-worker-package.mjs",
     "cf-types": "wrangler types",
+    "precheck": "npm run build",
     "check": "tsc --noEmit",
     "package:check": "npm run build && node ../../scripts/check-worker-package.mjs",
     "pretest": "npm run build",
