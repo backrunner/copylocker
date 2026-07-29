@@ -1,0 +1,3 @@
+[submodule "private/copylocker-suite-priv"]
+	path = private/copylocker-suite-priv
+	url = ../copylocker-suite-priv.git
