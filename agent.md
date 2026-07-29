@@ -40,7 +40,7 @@ repository boundary, accepted risk, or immediate plan.
 | M1 operations | Implemented locally | CLI bootstrap/admin flows, eight migrations, generated server template |
 | M2 client core | Implemented locally | State machine, protected store, fingerprinting, transport, offline artifacts |
 | M2 native SDKs | Implemented locally | C ABI, Node-API, Tauri and Electron packages plus runnable examples |
-| Native platform evidence | Partially complete | Three-OS CI matrix exists; current checkout was validated on macOS, remote matrix evidence remains required |
+| Native platform evidence | Complete for the current M2 baseline | GitHub Actions run `30493941556` passed the full SDK flow on macOS 14, Ubuntu 24.04, and Windows 2022 at public commit `52ed666` |
 | M3 Web SDK | Not implemented | Only the browser verifier size/performance harness exists |
 | M4 build tooling | Not implemented | unplugin, guard, seal packages remain roadmap work |
 | M5 private suite and release variants | Private suite core implemented; release integration pending | CL-PRIV-1, vendor profile generator, private KAT, fuzz/timing gates, independent CI, and commercial templates exist at private commit `fefac42`; application release variants and authorized combined-build evidence remain pending |
@@ -50,6 +50,9 @@ repository boundary, accepted risk, or immediate plan.
 
 ## Last Verified Release Baseline
 
+- Public GitHub Actions run `30493940780` passed all nine quality, conformance, no_std, Worker,
+  size, and supply-chain jobs at commit `52ed666`; Native SDK run `30493941556` passed all three
+  platform jobs at the same commit.
 - Rust formatting, workspace check, Clippy, workspace tests, architecture boundary, host no_std,
   and wasm no_std checks passed.
 - ML-DSA parameter sets 44, 65, and 87 each passed 60 tests.
@@ -60,6 +63,12 @@ repository boundary, accepted risk, or immediate plan.
 - Browser verifier WASM: 170,355 raw bytes and 72,001 gzip bytes; p95 verification 1.028 ms.
 - FFI, Node, Tauri, Electron, template, package, npm audit, cargo-deny, cargo-audit, KAT, and
   workflow lint gates passed locally.
+- The Apple M4 reference crypto profile retains the 3 ms signing and 5 ms verification product
+  gates. The pinned Ubuntu 24.04 quality job uses the documented 12 ms and 8 ms shared-runner
+  regression ceilings; that profile is not product-SLO evidence.
+- Clean-runner blockers are resolved for Worker runtime generation, Tauri bundle icons, Linux
+  desktop dependencies, supported action runtimes, hardware-specific performance calibration,
+  and Windows ASAR path handling.
 - No npm package has been published and no Cloudflare deploy/bootstrap confirmation has run.
 
 ## Private Suite Evidence
@@ -105,8 +114,8 @@ repository boundary, accepted risk, or immediate plan.
    application integration, vendor-profile lifecycle, migration process, and release evidence.
 2. Preserve a public CI path that does not initialize the private submodule; keep private suite CI
    independent and add an authorized combined-build pipeline before any integrated release.
-3. Close remaining M0-M2 evidence: remote Linux/Windows/macOS matrix, sustained fuzzing, memory
-   budget, and the documented deployment/activation usability exercise.
+3. Close remaining M0-M2 evidence: sustained fuzzing, memory budget, and the documented
+   deployment/activation usability exercise.
 4. Continue the original roadmap at M3: Web SDK, worker isolation, browser storage, framework
    bindings, examples, CSP checks, and browser E2E.
 5. Implement M4 build tooling, then finish M5 release variants, offline flows, and private suite
