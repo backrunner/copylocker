@@ -1,0 +1,4 @@
+interface:
+  display_name: "Develop CopyLocker"
+  short_description: "Apply CopyLocker engineering and commit standards"
+  default_prompt: "Use $develop-copylocker to implement and validate a CopyLocker change."
