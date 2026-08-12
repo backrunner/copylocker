@@ -179,6 +179,10 @@ type BillingWebhookEvent = {
 const textEncoder = new TextEncoder();
 const uint64Mask = (1n << 64n) - 1n;
 const suiteId = [0x01, 0x00, 0x00, 0x01];
+// The synthetic second suite the worker accepts only under ENVIRONMENT=test
+// (`src/suites.rs` TEST_SUITE_ID).
+const testSuiteId = [0x02, 0x00, 0x00, 0x01];
+const unknownSuiteId = [0x7f, 0x00, 0x00, 0x01];
 const productId = "product_1";
 const activationLicenseKey = "CL1-NC0G4-0R40M-30E20-91AEX";
 const activationLicenseKeyBytes = hexBytes("ab0102030405060708090a");
@@ -342,7 +346,7 @@ function unsignedInt64(value: number): Uint8Array {
   return bytes;
 }
 
-function concatBytes(parts: Uint8Array[]): Uint8Array {
+function concatBytes(parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const output = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
   let offset = 0;
   for (const part of parts) {
@@ -485,6 +489,11 @@ function cborMap(value: unknown): Map<unknown, unknown> {
   return value;
 }
 
+/// Narrowed variant for maps with integer keys (the CopyLocker wire convention).
+function cborIntMap(value: unknown): Map<number, TestCborValue> {
+  return cborMap(value) as Map<number, TestCborValue>;
+}
+
 function cborBytes(value: unknown): Uint8Array {
   if (!(value instanceof Uint8Array)) throw new Error("expected CBOR bytes");
   return value;
@@ -533,11 +542,12 @@ async function signDeviceProof(
   domain: "ar" | "validate-request" | "heartbeat-request" | "deactivate-request",
   proofInput: Uint8Array,
   privateKey: CryptoKey,
+  suite: number[] = suiteId,
 ): Promise<number[]> {
   const context = concatBytes([
     textEncoder.encode(`copylocker/v1/${domain}`),
     new Uint8Array([0]),
-    new Uint8Array(suiteId),
+    new Uint8Array(suite),
     textEncoder.encode(productId),
   ]);
   const toBeSigned = concatBytes([
@@ -558,6 +568,12 @@ function activationRequestWithoutProof(
   deviceSigVk: number[],
   nonce: number[],
   licenseKey = activationLicenseKey,
+  release: { releaseId: string; buildFp: string; variantId: number } = {
+    releaseId: "rel_1",
+    buildFp: "build-validate",
+    variantId: 1,
+  },
+  suite: number[] = suiteId,
 ): Map<number, TestCborValue> {
   const credential = new Map<number, TestCborValue>([[0, licenseKey]]);
   const clientInfo = new Map<number, TestCborValue>([
@@ -565,15 +581,15 @@ function activationRequestWithoutProof(
     [1, "0.1.0"],
     [2, "macos"],
     [3, "arm64"],
-    [4, "build-validate"],
-    [5, "rel_1"],
-    [6, 1],
-    [7, [new Uint8Array(suiteId)]],
-    [8, [1]],
+    [4, release.buildFp],
+    [5, release.releaseId],
+    [6, release.variantId],
+    [7, [new Uint8Array(suite)]],
+    [8, [release.variantId]],
   ]);
   return new Map<number, TestCborValue>([
     [0, 1],
-    [1, new Uint8Array(suiteId)],
+    [1, new Uint8Array(suite)],
     [2, productId],
     [3, credential],
     [4, new Uint8Array(32).fill(7)],
@@ -590,6 +606,8 @@ async function activationRequestCbor(
   keys: DeviceKeys,
   fingerprintByte = 7,
   licenseKey = activationLicenseKey,
+  release?: { releaseId: string; buildFp: string; variantId: number },
+  suite: number[] = suiteId,
 ): Promise<Uint8Array> {
   const nonce = new Array<number>(32).fill(71);
   const request = activationRequestWithoutProof(
@@ -597,12 +615,14 @@ async function activationRequestCbor(
     keys.verifyingKey,
     nonce,
     licenseKey,
+    release,
+    suite,
   );
   request.set(4, new Uint8Array(32).fill(fingerprintByte));
   const proofInput = encodeTestCbor(request);
   request.set(
     12,
-    new Uint8Array(await signDeviceProof("ar", proofInput, keys.privateKey)),
+    new Uint8Array(await signDeviceProof("ar", proofInput, keys.privateKey, suite)),
   );
   return encodeTestCbor(request);
 }
@@ -636,6 +656,7 @@ async function verifyFastArtifact(
   domain: "validation-ticket" | "kill-order",
   tbs: Uint8Array,
   signature: Uint8Array,
+  suite: number[] = suiteId,
 ): Promise<boolean> {
   const verifyingKey = await crypto.subtle.importKey(
     "raw",
@@ -647,7 +668,7 @@ async function verifyFastArtifact(
   const context = concatBytes([
     textEncoder.encode(`copylocker/v1/${domain}`),
     new Uint8Array([0]),
-    new Uint8Array(suiteId),
+    new Uint8Array(suite),
     textEncoder.encode(productId),
   ]);
   const signed = concatBytes([
@@ -717,37 +738,65 @@ async function lifecycleAuthentication(
   };
 }
 
+function telemetryCborValue(block: {
+  consentVersion: number;
+  sessionCount: number;
+  windowStart?: number;
+  histogram?: number[];
+  featureHits?: Record<string, number>;
+  daysActive?: number;
+}): Map<number, TestCborValue> {
+  const hits = new Map(Object.entries(block.featureHits ?? { "feature.alpha": 1 }));
+  return new Map<number, TestCborValue>([
+    [0, block.consentVersion],
+    [1, block.windowStart ?? 1_700_000_000],
+    [2, block.sessionCount],
+    [3, block.histogram ?? [2, 1, 0, 0]],
+    [4, hits as unknown as TestCborValue],
+    [5, block.daysActive ?? 2],
+  ]);
+}
+
 function validateProofInput(
   licenseId: number[],
   machineId: number[],
   nonce: number[],
   knownRevocationEpoch = 0,
+  release: { releaseId: string; buildFp: string; variantId: number } = {
+    releaseId: "rel_1",
+    buildFp: "build-validate",
+    variantId: 1,
+  },
+  telemetry?: Map<number, TestCborValue>,
+  suite: number[] = suiteId,
 ): Uint8Array {
   const clientInfo = new Map<number, TestCborValue>([
     [0, "1.2.3"],
     [1, "0.1.0"],
     [2, "macos"],
     [3, "arm64"],
-    [4, "build-validate"],
-    [5, "rel_1"],
-    [6, 1],
-    [7, [new Uint8Array(suiteId)]],
-    [8, [1]],
+    [4, release.buildFp],
+    [5, release.releaseId],
+    [6, release.variantId],
+    [7, [new Uint8Array(suite)]],
+    [8, [release.variantId]],
   ]);
-  return encodeTestCbor(
-    new Map<number, TestCborValue>([
-      [0, 1],
-      [1, new Uint8Array(suiteId)],
-      [2, new Uint8Array(machineId)],
-      [3, new Uint8Array(32).fill(7)],
-      [4, new Uint8Array(nonce)],
-      [5, 1_700_000_000],
-      [6, knownRevocationEpoch],
-      [7, clientInfo],
-      [10, 0],
-      [12, new Uint8Array(licenseId)],
-    ]),
-  );
+  const request = new Map<number, TestCborValue>([
+    [0, 1],
+    [1, new Uint8Array(suite)],
+    [2, new Uint8Array(machineId)],
+    [3, new Uint8Array(32).fill(7)],
+    [4, new Uint8Array(nonce)],
+    [5, 1_700_000_000],
+    [6, knownRevocationEpoch],
+    [7, clientInfo],
+    [10, 0],
+    [12, new Uint8Array(licenseId)],
+  ]);
+  if (telemetry !== undefined) {
+    request.set(11, telemetry);
+  }
+  return encodeTestCbor(request);
 }
 
 function validateRequestCbor(
@@ -756,33 +805,42 @@ function validateRequestCbor(
   nonce: number[],
   proof: number[],
   knownRevocationEpoch = 0,
+  release: { releaseId: string; buildFp: string; variantId: number } = {
+    releaseId: "rel_1",
+    buildFp: "build-validate",
+    variantId: 1,
+  },
+  telemetry?: Map<number, TestCborValue>,
+  suite: number[] = suiteId,
 ): Uint8Array {
   const clientInfo = new Map<number, TestCborValue>([
     [0, "1.2.3"],
     [1, "0.1.0"],
     [2, "macos"],
     [3, "arm64"],
-    [4, "build-validate"],
-    [5, "rel_1"],
-    [6, 1],
-    [7, [new Uint8Array(suiteId)]],
-    [8, [1]],
+    [4, release.buildFp],
+    [5, release.releaseId],
+    [6, release.variantId],
+    [7, [new Uint8Array(suite)]],
+    [8, [release.variantId]],
   ]);
-  return encodeTestCbor(
-    new Map<number, TestCborValue>([
-      [0, 1],
-      [1, new Uint8Array(suiteId)],
-      [2, new Uint8Array(machineId)],
-      [3, new Uint8Array(32).fill(7)],
-      [4, new Uint8Array(nonce)],
-      [5, 1_700_000_000],
-      [6, knownRevocationEpoch],
-      [7, clientInfo],
-      [8, new Uint8Array(proof)],
-      [10, 0],
-      [12, new Uint8Array(licenseId)],
-    ]),
-  );
+  const request = new Map<number, TestCborValue>([
+    [0, 1],
+    [1, new Uint8Array(suite)],
+    [2, new Uint8Array(machineId)],
+    [3, new Uint8Array(32).fill(7)],
+    [4, new Uint8Array(nonce)],
+    [5, 1_700_000_000],
+    [6, knownRevocationEpoch],
+    [7, clientInfo],
+    [8, new Uint8Array(proof)],
+    [10, 0],
+    [12, new Uint8Array(licenseId)],
+  ]);
+  if (telemetry !== undefined) {
+    request.set(11, telemetry);
+  }
+  return encodeTestCbor(request);
 }
 
 function licenseObject(value: number): {
@@ -1035,7 +1093,7 @@ function postAdminRevoke(
 
 function adminJson(
   path: string,
-  method: "GET" | "POST" | "PATCH",
+  method: "GET" | "POST" | "PATCH" | "DELETE",
   token: string,
   body?: unknown,
   idempotencyKey?: string,
@@ -1721,6 +1779,29 @@ describe("worker runtime", () => {
     expect(response.headers.get("content-type")).toBe("application/cbor");
     expect(response.headers.get("cache-control")).toBe("public, max-age=300");
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(payload);
+  });
+
+  it("answers CORS preflight and marks protocol responses cross-origin readable", async () => {
+    // Browser SDKs call the license server from their own origin; the
+    // unauthenticated protocol endpoints must allow that (admin stays CORS-less).
+    const preflight = await exports.default.fetch("https://copylocker.test/v1/activate", {
+      method: "OPTIONS",
+    });
+    expect(preflight.status).toBe(204);
+    expect(preflight.headers.get("access-control-allow-origin")).toBe("*");
+    expect(preflight.headers.get("access-control-allow-headers")).toContain("X-CL-Proto");
+    expect(preflight.headers.get("access-control-allow-headers")).toContain(
+      "Idempotency-Key",
+    );
+
+    await env.CACHE.put("keys:current", new Uint8Array([0xa0]));
+    const keys = await exports.default.fetch("https://copylocker.test/v1/keys", {
+      headers: { "X-CL-Proto": "1" },
+    });
+    expect(keys.headers.get("access-control-allow-origin")).toBe("*");
+
+    const admin = await exports.default.fetch("https://copylocker.test/v1/admin/catalog/features");
+    expect(admin.headers.get("access-control-allow-origin")).toBeNull();
   });
 
   it("streams the requested signed revocation batch from KV", async () => {
@@ -3624,6 +3705,8 @@ describe("worker runtime", () => {
       "licenses:rw",
       "epochs:rw",
       "revoke",
+      "releases:rw",
+      "sign:manifest",
     ]);
     const epochId = hexId(licenseId.slice(0, 8));
     const adminRoutes = [
@@ -3643,6 +3726,14 @@ describe("worker runtime", () => {
       { method: "POST", path: `/v1/admin/machines/${hexId(machineBytes(2_041))}/revoke` },
       { method: "POST", path: "/v1/admin/epochs" },
       { method: "POST", path: `/v1/admin/epochs/${epochId}/revoke?dry_run=true` },
+      { method: "POST", path: "/v1/admin/asset-keks" },
+      { method: "DELETE", path: "/v1/admin/asset-keks/rel_1/feature.alpha" },
+      { method: "POST", path: "/v1/admin/integrity/keys" },
+      {
+        method: "POST",
+        path: `/v1/admin/integrity/keys/${"00".repeat(32)}/revoke?dry_run=true`,
+      },
+      { method: "POST", path: "/v1/admin/integrity/sign" },
     ];
     await assertNoInternalErrors(
       adminRoutes.flatMap(({ method, path }, routeIndex) =>
@@ -3758,6 +3849,139 @@ describe("worker runtime", () => {
     const replay = await activate();
     expect(replay.status).toBe(200);
     expect(new Uint8Array(await replay.arrayBuffer())).toEqual(firstBytes);
+  });
+
+  it("serves a second registered suite end to end on activation and validate", async () => {
+    const { licenseId } = licenseObject(1_201);
+    const licenseKey = testLicenseKey(44);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    const keys = await generateDeviceKeys();
+
+    const activation = await postActivation(
+      await activationRequestCbor(
+        hexBytes(env.TEST_DEVICE_KEM_EK),
+        keys,
+        7,
+        licenseKey.value,
+        undefined,
+        testSuiteId,
+      ),
+      "suite-coexist-activate",
+    );
+    expect(activation.status).toBe(200);
+    const activationEnvelope = cborMap(
+      decodeTestCbor(new Uint8Array(await activation.arrayBuffer())),
+    );
+    expect(cborBytes(activationEnvelope.get(1))).toEqual(new Uint8Array(testSuiteId));
+    const credential = cborMap(decodeTestCbor(cborBytes(activationEnvelope.get(3))));
+    expect(cborBytes(credential.get(1))).toEqual(new Uint8Array(testSuiteId));
+    const machineId = [...cborBytes(credential.get(4))];
+    expect(machineId).toHaveLength(16);
+    const wrappedOffline = cborMap(credential.get(21));
+    expect(cborBytes(wrappedOffline.get("feature.alpha"))).toHaveLength(72);
+
+    const nonce = new Array<number>(32).fill(73);
+    const proofInput = validateProofInput(
+      licenseId,
+      machineId,
+      nonce,
+      0,
+      undefined,
+      undefined,
+      testSuiteId,
+    );
+    const proof = await signDeviceProof(
+      "validate-request",
+      proofInput,
+      keys.privateKey,
+      testSuiteId,
+    );
+    const ticket = await exports.default.fetch("https://copylocker.test/v1/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/cbor", "X-CL-Proto": "1" },
+      body: validateRequestCbor(
+        licenseId,
+        machineId,
+        nonce,
+        proof,
+        0,
+        undefined,
+        undefined,
+        testSuiteId,
+      ),
+    });
+    expect(ticket.status).toBe(200);
+    const ticketEnvelope = cborMap(
+      decodeTestCbor(new Uint8Array(await ticket.arrayBuffer())),
+    );
+    expect(cborBytes(ticketEnvelope.get(1))).toEqual(new Uint8Array(testSuiteId));
+    const ticketTbs = cborBytes(ticketEnvelope.get(3));
+    expect(
+      await verifyFastArtifact(
+        "validation-ticket",
+        ticketTbs,
+        cborBytes(ticketEnvelope.get(4)),
+        testSuiteId,
+      ),
+    ).toBe(true);
+    const ticketBody = cborMap(decodeTestCbor(ticketTbs));
+    expect(cborBytes(ticketBody.get(1))).toEqual(new Uint8Array(testSuiteId));
+    const wrappedOnline = cborMap(ticketBody.get(15));
+    expect(cborBytes(wrappedOnline.get("feature.alpha"))).toHaveLength(72);
+  });
+
+  it("fails closed on an unknown suite id on activation and validate", async () => {
+    const { licenseId } = licenseObject(1_202);
+    const licenseKey = testLicenseKey(45);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    const keys = await generateDeviceKeys();
+
+    const activation = await postActivation(
+      await activationRequestCbor(
+        hexBytes(env.TEST_DEVICE_KEM_EK),
+        keys,
+        7,
+        licenseKey.value,
+        undefined,
+        unknownSuiteId,
+      ),
+      "suite-unknown-activate",
+    );
+    expect(activation.status).toBe(403);
+    expect(await protocolErrorCode(activation)).toBe(1000);
+
+    const nonce = new Array<number>(32).fill(74);
+    const proofInput = validateProofInput(
+      licenseId,
+      machineBytes(1_202),
+      nonce,
+      0,
+      undefined,
+      undefined,
+      unknownSuiteId,
+    );
+    const proof = await signDeviceProof(
+      "validate-request",
+      proofInput,
+      keys.privateKey,
+      unknownSuiteId,
+    );
+    const validate = await exports.default.fetch("https://copylocker.test/v1/validate", {
+      method: "POST",
+      headers: { "Content-Type": "application/cbor", "X-CL-Proto": "1" },
+      body: validateRequestCbor(
+        licenseId,
+        machineBytes(1_202),
+        nonce,
+        proof,
+        0,
+        undefined,
+        undefined,
+        unknownSuiteId,
+      ),
+    });
+    expect(validate.status).toBe(403);
+    expect(await protocolErrorCode(validate)).toBe(1000);
   });
 
   it("requires an idempotency key before reserving an activation seat", async () => {
@@ -4599,8 +4823,17 @@ describe("worker runtime", () => {
       revocation_epoch: 0,
       security_floor: 0,
       suspicion: 0,
+      previous_suspicion: 0,
+      suspicion_contributions: [
+        { signal: "fingerprint_spread", points: 0, max: 40 },
+        { signal: "geo_jump", points: 0, max: 25 },
+        { signal: "attr_churn", points: 0, max: 15 },
+        { signal: "call_rate", points: 0, max: 10 },
+        { signal: "version_spread", points: 0, max: 10 },
+      ],
       fingerprint: new Array<number>(32).fill(5),
       credential_state: null,
+      activation_path: "online",
     });
 
     const revoked = await postJson(stub, "/revoke", {
@@ -4957,6 +5190,1843 @@ describe("worker runtime", () => {
     }
   });
 
+  it("registers asset KEKs through the Admin API without storing plaintext", async () => {
+    await seedProjectedLicense(licenseBytes(2_201));
+    await env.DB.exec("DELETE FROM release_feature_keks");
+    const token = testAdminToken(71);
+    await seedAdminToken(token, ["releases:rw"]);
+    const kekHex = "aa".repeat(32);
+    const body = {
+      product_id: productId,
+      release_id: "rel_1",
+      feature_id: "feature.alpha",
+      kek_hex: kekHex,
+    };
+    const register = (idempotencyKey: string) =>
+      adminJson("/asset-keks", "POST", token, body, idempotencyKey);
+
+    const created = await register("asset-kek-register-1");
+    expect(created.status).toBe(201);
+    const createdBody = (await created.json()) as Record<string, unknown>;
+    expect(createdBody.ok).toBe(true);
+    expect(createdBody.kek_fingerprint).toMatch(/^[0-9a-f]{64}$/);
+    expect(JSON.stringify(createdBody)).not.toContain(kekHex);
+
+    // The same Idempotency-Key replays the stored result without re-inserting.
+    const replay = await register("asset-kek-register-1");
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toEqual(createdBody);
+
+    // The same Idempotency-Key with a different payload conflicts.
+    const conflicting = await adminJson(
+      "/asset-keks",
+      "POST",
+      token,
+      { ...body, kek_hex: "bb".repeat(32) },
+      "asset-kek-register-1",
+    );
+    expect(conflicting.status).toBe(409);
+
+    // A second registration for the same release/feature conflicts.
+    const duplicate = await register("asset-kek-register-2");
+    expect(duplicate.status).toBe(409);
+
+    // D1 holds only the AEAD ciphertext: nonce ‖ ciphertext ‖ tag, never the KEK.
+    const row = await env.DB.prepare(
+      "SELECT encrypted_kek FROM release_feature_keks \
+       WHERE release_id = 'rel_1' AND feature_id = 'feature.alpha'",
+    ).first<{ encrypted_kek: ArrayBuffer }>();
+    expect(row).not.toBeNull();
+    const stored = new Uint8Array(row?.encrypted_kek ?? new ArrayBuffer(0));
+    expect(stored).toHaveLength(72);
+    expect(stored.slice(24, 56)).not.toEqual(new Uint8Array(32).fill(0xaa));
+
+    const noToken = await adminJson("/asset-keks", "POST", "", body, "asset-kek-register-3");
+    expect(noToken.status).toBe(401);
+    const wrongScope = testAdminToken(72);
+    await seedAdminToken(wrongScope, ["catalog:rw"]);
+    const forbidden = await adminJson(
+      "/asset-keks",
+      "POST",
+      wrongScope,
+      body,
+      "asset-kek-register-4",
+    );
+    expect(forbidden.status).toBe(403);
+    const otherVendor = testAdminToken(73);
+    await seedAdminToken(otherVendor, ["releases:rw"], "vendor_2", "other-admin");
+    const crossVendor = await adminJson(
+      "/asset-keks",
+      "POST",
+      otherVendor,
+      body,
+      "asset-kek-register-5",
+    );
+    expect(crossVendor.status).toBe(404);
+  });
+
+  it("lists and deletes asset KEKs with a dry-run default", async () => {
+    await seedProjectedLicense(licenseBytes(2_202));
+    await env.DB.exec("DELETE FROM release_feature_keks");
+    const token = testAdminToken(74);
+    await seedAdminToken(token, ["releases:rw"]);
+    const register = await adminJson(
+      "/asset-keks",
+      "POST",
+      token,
+      {
+        product_id: productId,
+        release_id: "rel_1",
+        feature_id: "feature.alpha",
+        kek_hex: "cc".repeat(32),
+      },
+      "asset-kek-list-register",
+    );
+    expect(register.status).toBe(201);
+    const { kek_fingerprint: fingerprint } = (await register.json()) as Record<string, unknown>;
+
+    const list = await adminJson(
+      `/asset-keks?product_id=${productId}&release_id=rel_1`,
+      "GET",
+      token,
+    );
+    expect(list.status).toBe(200);
+    const listBody = (await list.json()) as { items: Array<Record<string, unknown>> };
+    expect(listBody.items).toHaveLength(1);
+    expect(listBody.items[0]?.kek_fingerprint).toBe(fingerprint);
+    expect(JSON.stringify(listBody)).not.toContain("cc".repeat(32));
+
+    const deleteKek = (query: string, idempotencyKey?: string) => {
+      const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
+      if (idempotencyKey !== undefined) headers["Idempotency-Key"] = idempotencyKey;
+      return exports.default.fetch(
+        `https://copylocker.test/v1/admin/asset-keks/rel_1/feature.alpha?product_id=${productId}${query}`,
+        { method: "DELETE", headers },
+      );
+    };
+    const dryRun = await deleteKek("");
+    expect(dryRun.status).toBe(200);
+    expect(((await dryRun.json()) as Record<string, unknown>).dry_run).toBe(true);
+    const stillThere = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM release_feature_keks",
+    ).first<{ count: number }>();
+    expect(stillThere?.count).toBe(1);
+
+    const missingKey = await deleteKek("&dry_run=false");
+    expect(missingKey.status).toBe(400);
+
+    const confirmed = await deleteKek("&dry_run=false", "asset-kek-delete-1");
+    expect(confirmed.status).toBe(200);
+    const confirmedBody = (await confirmed.json()) as Record<string, unknown>;
+    expect(confirmedBody.dry_run).toBe(false);
+
+    const deletedReplay = await deleteKek("&dry_run=false", "asset-kek-delete-1");
+    expect(deletedReplay.status).toBe(200);
+    expect(await deletedReplay.json()).toEqual(confirmedBody);
+
+    const gone = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM release_feature_keks",
+    ).first<{ count: number }>();
+    expect(gone?.count).toBe(0);
+    const missing = await deleteKek("&dry_run=false", "asset-kek-delete-2");
+    expect(missing.status).toBe(404);
+  });
+
+  it("wraps Admin-registered KEKs into credentials only for entitled features", async () => {
+    const { licenseId } = licenseObject(2_203);
+    const licenseKey = testLicenseKey(21);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    await env.DB.exec("DELETE FROM release_feature_keks");
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO features(product_id, id, label, created_at) VALUES (?, ?, ?, ?)",
+    )
+      .bind(productId, "feature.beta", "Beta", 1)
+      .run();
+    const token = testAdminToken(75);
+    await seedAdminToken(token, ["releases:rw"]);
+    // The license entitlements only cover feature.alpha (tier "pro"); feature.beta
+    // has a registered KEK but must not be wrapped for this machine.
+    for (const [feature, kekHex, key] of [
+      ["feature.alpha", "dd".repeat(32), "asset-kek-issuance-alpha"],
+      ["feature.beta", "ee".repeat(32), "asset-kek-issuance-beta"],
+    ] as const) {
+      const registered = await adminJson(
+        "/asset-keks",
+        "POST",
+        token,
+        {
+          product_id: productId,
+          release_id: "rel_1",
+          feature_id: feature,
+          kek_hex: kekHex,
+        },
+        key,
+      );
+      expect(registered.status).toBe(201);
+    }
+
+    const keys = await generateDeviceKeys();
+    const requestBody = await activationRequestCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      keys,
+      7,
+      licenseKey.value,
+    );
+    const activation = await postActivation(requestBody, "asset-kek-activation");
+    expect(activation.status).toBe(200);
+    const envelope = cborMap(decodeTestCbor(new Uint8Array(await activation.arrayBuffer())));
+    const credential = cborMap(decodeTestCbor(cborBytes(envelope.get(3))));
+    const wrappedKeks = cborMap(credential.get(21));
+    expect(cborBytes(wrappedKeks.get("feature.alpha"))).toHaveLength(72);
+    expect(wrappedKeks.get("feature.beta")).toBeUndefined();
+  });
+
+  const buildSignerPublicKeyHex =
+    "6e7a1cdd29b0b78fd13af4c5598feff4ef2a97166e3ca6f2e4fbfccd80505bf1";
+  const buildSignerFingerprint =
+    "7599776c3085e3f9da0d13071eb0b4ab50fd2bf64c06dd92c2365af3a328eca3";
+
+  function manifestTbs(buildFingerprint: string = "build-2026-08"): Uint8Array {
+    return encodeTestCbor(
+      new Map<number, TestCborValue>([
+        [0, 1],
+        [1, new Uint8Array(suiteId)],
+        [2, productId],
+        [3, buildFingerprint],
+        [4, 1_700_000_000],
+        [5, "sha256"],
+        [6, new Map<number, TestCborValue>()],
+        [9, new Uint8Array(32).fill(9)],
+      ]),
+    );
+  }
+
+  function signRequest(
+    token: string | undefined,
+    body: Uint8Array,
+  ): Promise<Response> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/octet-stream",
+    };
+    if (token !== undefined) headers.Authorization = `Bearer ${token}`;
+    return exports.default.fetch("https://copylocker.test/v1/admin/integrity/sign", {
+      method: "POST",
+      headers,
+      body: body.slice(),
+    });
+  }
+
+  async function seedSignerProduct(): Promise<void> {
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO vendors(id, name, fpr_salt_ref, created_at) VALUES (?, ?, ?, ?)",
+      ).bind("vendor_1", "Vendor", "salt_ref", 1),
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO products(\
+           id, vendor_id, name, min_suite_id, min_proto_ver, min_sdk_version, created_at\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(productId, "vendor_1", "Product", new Uint8Array([1]), 1, "0.1.0", 1),
+    ]);
+  }
+
+  async function seedSignerKey(token: string, idempotencyKey: string): Promise<void> {
+    await env.DB.prepare("DELETE FROM integrity_signer_keys WHERE product_id = ?")
+      .bind(productId)
+      .run();
+    const registered = await adminJson(
+      "/integrity/keys",
+      "POST",
+      token,
+      { product_id: productId, public_key_hex: buildSignerPublicKeyHex },
+      idempotencyKey,
+    );
+    expect(registered.status).toBe(201);
+  }
+
+  it("registers, lists, and revokes integrity signer keys", async () => {
+    await seedSignerProduct();
+    const token = testAdminToken(76);
+    await seedAdminToken(token, ["sign:manifest"]);
+    const body = { product_id: productId, public_key_hex: buildSignerPublicKeyHex };
+
+    const registered = await adminJson("/integrity/keys", "POST", token, body, "signer-key-1");
+    expect(registered.status).toBe(201);
+    const registeredBody = (await registered.json()) as Record<string, unknown>;
+    expect(registeredBody.fingerprint).toBe(buildSignerFingerprint);
+
+    const replay = await adminJson("/integrity/keys", "POST", token, body, "signer-key-1");
+    expect(replay.status).toBe(201);
+    expect(await replay.json()).toEqual(registeredBody);
+
+    const duplicate = await adminJson("/integrity/keys", "POST", token, body, "signer-key-2");
+    expect(duplicate.status).toBe(409);
+
+    const listed = await adminJson(`/integrity/keys?product_id=${productId}`, "GET", token);
+    const listedBody = (await listed.json()) as { items: Array<Record<string, unknown>> };
+    expect(listedBody.items.map((item) => item.fingerprint)).toContain(buildSignerFingerprint);
+
+    const revoke = (query: string, idempotencyKey?: string) =>
+      adminJson(
+        `/integrity/keys/${buildSignerFingerprint}/revoke?product_id=${productId}${query}`,
+        "POST",
+        token,
+        {},
+        idempotencyKey,
+      );
+    const dryRun = await revoke("");
+    expect(dryRun.status).toBe(200);
+    expect(((await dryRun.json()) as Record<string, unknown>).dry_run).toBe(true);
+
+    const missingKey = await revoke("&dry_run=false");
+    expect(missingKey.status).toBe(400);
+
+    const confirmed = await revoke("&dry_run=false", "signer-key-revoke-1");
+    expect(confirmed.status).toBe(200);
+    expect(((await confirmed.json()) as Record<string, unknown>).status).toBe("revoked");
+
+    const again = await revoke("&dry_run=false", "signer-key-revoke-2");
+    expect(again.status).toBe(409);
+
+    const wrongScope = testAdminToken(77);
+    await seedAdminToken(wrongScope, ["releases:rw"]);
+    const forbidden = await adminJson("/integrity/keys", "POST", wrongScope, body, "signer-key-3");
+    expect(forbidden.status).toBe(403);
+  });
+
+  it("signs manifest tbs bytes with an Admin token and journals the signature", async () => {
+    await seedSignerProduct();
+    const token = testAdminToken(78);
+    await seedAdminToken(token, ["sign:manifest"]);
+    await seedSignerKey(token, "signer-key-sign");
+
+    const tbs = manifestTbs();
+    const signed = await signRequest(token, tbs);
+    expect(signed.status).toBe(200);
+    expect(signed.headers.get("content-type")).toBe("application/octet-stream");
+    expect(signed.headers.get("x-cl-signer-key")).toBe(buildSignerFingerprint);
+    const signature = new Uint8Array(await signed.arrayBuffer());
+    expect(signature).toHaveLength(64);
+
+    // Byte-level contract with @copylocker/guard: Ed25519 over "copylocker/im-sig/v1" ‖ tbs.
+    const verifyingKey = await crypto.subtle.importKey(
+      "raw",
+      new Uint8Array(hexBytes(buildSignerPublicKeyHex)),
+      "Ed25519",
+      false,
+      ["verify"],
+    );
+    const signedMessage = concatBytes([textEncoder.encode("copylocker/im-sig/v1"), tbs]);
+    expect(await crypto.subtle.verify("Ed25519", verifyingKey, signature, signedMessage)).toBe(
+      true,
+    );
+
+    // A retry of the same tbs is an idempotent journal replay: same bytes, one journal row.
+    const retry = await signRequest(token, tbs);
+    expect(retry.status).toBe(200);
+    expect(new Uint8Array(await retry.arrayBuffer())).toEqual(signature);
+    const journal = await env.DB.prepare(
+      "SELECT COUNT(*) AS count FROM admin_operations WHERE action = 'integrity:sign'",
+    ).first<{ count: number }>();
+    expect(journal?.count).toBe(1);
+
+    const noToken = await signRequest(undefined, tbs);
+    expect(noToken.status).toBe(401);
+    const wrongScope = testAdminToken(79);
+    await seedAdminToken(wrongScope, ["releases:rw"]);
+    expect((await signRequest(wrongScope, tbs)).status).toBe(403);
+    const jsonBody = await exports.default.fetch(
+      "https://copylocker.test/v1/admin/integrity/sign",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({}),
+      },
+    );
+    expect(jsonBody.status).toBe(415);
+    expect((await signRequest(token, new Uint8Array([0xff]))).status).toBe(400);
+  });
+
+  it("rejects manifest signing when the build key is not registered", async () => {
+    await seedSignerProduct();
+    await env.DB.exec("DELETE FROM integrity_signer_keys");
+    const token = testAdminToken(102);
+    await seedAdminToken(token, ["sign:manifest"]);
+
+    const response = await signRequest(token, manifestTbs());
+    expect(response.status).toBe(403);
+    const body = (await response.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("signer_key_not_registered");
+  });
+
+  const oidcPrivateJwk = {
+    kty: "RSA",
+    kid: "test-kid-1",
+    alg: "RS256",
+    n: "zE2Kaj574DHXKwVkVIzsyBmYmGzI7b0pRx-vuTd3rP3dF4z-sAibLWvIpUjQ0p63EZ7f4F3Gb4VmJGEHU1aE7Ry0avf4YiYolIhg1O5CIYwmBaRgXoO7tSaV9OxKNDKAfp94mufuw3fl2QlxwKnW5uwqYVwdVyFUnxwwZpoAUJC-BoVtjy_xMlvkuiPaMdnvFP7pD7sdmTcUw9ZicJn03Do4LC9dULIBa8TahOV_7aUZSjyCRJkOCLKKQpehI1f4_J7XSCUmp8-XmtfdHGB8xgFfQmQuAzIHA-VHS_J_y_4h1bK3cSAORQUu0r5qnGS6O1bWilBMK4TU9PLCdndzyQ",
+    e: "AQAB",
+    d: "DwyRKxVSM6gINPuPMek1keHMy0GMJXL_JOWRIKAU2THUBOWWZyojIBvl6kLsWu9lBc_BpvnRYaqeZQSesQVZAkxQf-anLbeo2pQXKegpB-aWcGj0zlF-1K-0cResuZ6Ut38Qt7xo6o4c6LlY3zvDgDwaPRS3dpEWdifx6sTiTAzTuA_6obakvwMhmf7OxZ50DhQw66uZDgjszsbsnBbvO2aVWXMaJ4YomRlqqxhcM-LokU3EnXEIfWEDUZXnFMbGoX11rpcS_kxIyxSxCPqEkAfB2z1Bh5vJcJ7jZF2konFu2rRb81be-A2IljGYZRwYRQMtO7egVeMPP1Am15GB5w",
+    dp: "V7DV5yAtwgqSG3B4XymapDOLiTbNVU3jcfyJMOQbVr1TiQLRdYG_pM8OxWnDCm7HKjNutwxVoV7UUnG1XpW6Nt6KBfIn6ys2m84MJ1JYmc9JJq3z-oGlTrjfscWmrUMUBT8mt6jRWmqksyus-CB9GtIZ5Kdh8J0hs6wtenGYgc0",
+    dq: "DfSJ7534TGMGaIPnCk_IVtCPEm2spJUq-qidxA39iF7gl4PuKlYmp9aSjd_qkRRBGGBoNXHnk-YcSZakzlk8SiUGuOEU-3YOFH0vaRQclV7iDQoxsowfCEUGgAr_cKmXzWmqer4icuMyHJTevejae0c5J60GXYAxyt6c038i4u8",
+    p: "6LDDnKPSKtUcPCUbAggFSMQGL381IhfuQOLS4nj8McKJgiY2Bt_RTNWPeuqMeKt_pbmmgwGlDXV0lJNEWetRvwnlzUD3vgbcBcUVbcCFy7d5ZaHJe9bzq1Fu9LdC9_7aNjjiR-4EOJgRuPtBEhzemJvxD6opViASv6bJxpEvXN8",
+    q: "4MTKV_LojiULO5mL_6yds62TGAR4r8WWaw4uuZVFSrSgNKEq3JlSmzmXdr_q7Fv-BsNzMALVJIipmWG7O9WiuKyxSakrQa9wtujnarx4o0sFV8gNYnM7uwyRhqs4qi-39oeC84TDGZV8Phh-gfTTZtjU1Ys7nQHn6F6axu8ZnFc",
+    qi: "kVa0E-_lTtFYdW5mLE_f9DsEElAHrStaLJSKc99VOhfUk8W7gGzsBaBl7hJtm26k5yfpz-ez_TFgp7ayKr51xDSR3fjaC606NCddE0vXKJ2m7pnf2mYGwsTReiHHtVD2VllZ0ZFYJQF7kAvJGQATb8MGzNc6G1919kvsxDu2Bdo",
+  };
+
+  function base64urlEncode(bytes: Uint8Array): string {
+    let binary = "";
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+  }
+
+  function oidcClaims(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    const now = Math.floor(Date.now() / 1000);
+    return {
+      iss: "https://token.actions.githubusercontent.com",
+      aud: "copylocker-test-signing",
+      repository: "octo/app",
+      ref: "refs/heads/main",
+      sub: "repo:octo/app:ref:refs/heads/main",
+      iat: now - 60,
+      nbf: now - 60,
+      exp: now + 600,
+      ...overrides,
+    };
+  }
+
+  async function makeOidcJwt(claims: Record<string, unknown>): Promise<string> {
+    const header = base64urlEncode(
+      textEncoder.encode(JSON.stringify({ alg: "RS256", kid: "test-kid-1", typ: "JWT" })),
+    );
+    const payload = base64urlEncode(textEncoder.encode(JSON.stringify(claims)));
+    const key = await crypto.subtle.importKey(
+      "jwk",
+      oidcPrivateJwk,
+      { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const signature = await crypto.subtle.sign(
+      "RSASSA-PKCS1-v1_5",
+      key,
+      textEncoder.encode(`${header}.${payload}`),
+    );
+    return `${header}.${payload}.${base64urlEncode(new Uint8Array(signature))}`;
+  }
+
+  it("signs with a GitHub Actions OIDC token and rejects forged tokens", async () => {
+    await seedSignerProduct();
+    const token = testAdminToken(103);
+    await seedAdminToken(token, ["sign:manifest"]);
+    await seedSignerKey(token, "signer-key-oidc");
+    // A distinct tbs from the Admin-token signing test, so this signature gets its own
+    // journal row attributed to the OIDC actor.
+    const tbs = manifestTbs("build-oidc-2026-08");
+
+    const valid = await signRequest(await makeOidcJwt(oidcClaims()), tbs);
+    expect(valid.status).toBe(200);
+    const signature = new Uint8Array(await valid.arrayBuffer());
+    expect(signature).toHaveLength(64);
+    const verifyingKey = await crypto.subtle.importKey(
+      "raw",
+      new Uint8Array(hexBytes(buildSignerPublicKeyHex)),
+      "Ed25519",
+      false,
+      ["verify"],
+    );
+    const signedMessage = concatBytes([textEncoder.encode("copylocker/im-sig/v1"), tbs]);
+    expect(await crypto.subtle.verify("Ed25519", verifyingKey, signature, signedMessage)).toBe(
+      true,
+    );
+    const journal = await env.DB.prepare(
+      "SELECT actor FROM admin_operations WHERE action = 'integrity:sign' ORDER BY created_at DESC",
+    ).all<{ actor: string }>();
+    expect(journal.results.map((row) => row.actor)).toContain("oidc:octo/app");
+
+    const wrongRepository = await signRequest(
+      await makeOidcJwt(oidcClaims({ repository: "octo/other" })),
+      tbs,
+    );
+    expect(wrongRepository.status).toBe(401);
+    const wrongAudience = await signRequest(
+      await makeOidcJwt(oidcClaims({ aud: "https://example.test" })),
+      tbs,
+    );
+    expect(wrongAudience.status).toBe(401);
+    const expired = await signRequest(
+      await makeOidcJwt(oidcClaims({ exp: Math.floor(Date.now() / 1000) - 60 })),
+      tbs,
+    );
+    expect(expired.status).toBe(401);
+    const wrongIssuer = await signRequest(
+      await makeOidcJwt(oidcClaims({ iss: "https://issuer.example.test" })),
+      tbs,
+    );
+    expect(wrongIssuer.status).toBe(401);
+    const unknownKid = await makeOidcJwt(oidcClaims());
+    const [header, payload] = unknownKid.split(".");
+    const reheaded = `${base64urlEncode(
+      textEncoder.encode(JSON.stringify({ alg: "RS256", kid: "unknown-kid", typ: "JWT" })),
+    )}.${payload}.${unknownKid.split(".")[2]}`;
+    expect((await signRequest(reheaded, tbs)).status).toBe(401);
+    const tampered = `${header}.${payload}.AAAA`;
+    expect((await signRequest(tampered, tbs)).status).toBe(401);
+  });
+
+  async function seedReleaseAdminProduct(product: string): Promise<void> {
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO vendors(id, name, fpr_salt_ref, created_at) VALUES (?, ?, ?, ?)",
+      ).bind("vendor_1", "Vendor", "salt_ref", 1),
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO products(\
+           id, vendor_id, name, min_suite_id, min_proto_ver, min_sdk_version, created_at\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(product, "vendor_1", "Product", new Uint8Array([1]), 1, "0.1.0", 1),
+    ]);
+  }
+
+  async function activatePublic(
+    licenseKeyValue: string,
+    fingerprintByte: number,
+    release?: { releaseId: string; buildFp: string; variantId: number },
+    idempotencyKey = `public-activate-${fingerprintByte}-${release?.releaseId ?? "rel_1"}`,
+  ): Promise<{
+    response: Response;
+    credential: Map<number, TestCborValue> | null;
+    keys: DeviceKeys;
+  }> {
+    const keys = await generateDeviceKeys();
+    const body = await activationRequestCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      keys,
+      fingerprintByte,
+      licenseKeyValue,
+      release,
+    );
+    const response = await postActivation(body, idempotencyKey);
+    if (response.status !== 200) {
+      return { response, credential: null, keys };
+    }
+    const envelope = cborMap(
+      decodeTestCbor(new Uint8Array(await response.arrayBuffer())),
+    );
+    const credential = cborIntMap(decodeTestCbor(cborBytes(envelope.get(3))));
+    return { response, credential, keys };
+  }
+
+  async function validatePublicMachine(
+    licenseId: number[],
+    machineId: number[],
+    privateKey: CryptoKey,
+    nonceByte: number,
+    release?: { releaseId: string; buildFp: string; variantId: number },
+  ): Promise<Response> {
+    const nonce = new Array<number>(32).fill(nonceByte);
+    const proofInput = validateProofInput(licenseId, machineId, nonce, 0, release);
+    const proof = await signDeviceProof("validate-request", proofInput, privateKey);
+    return exports.default.fetch("https://copylocker.test/v1/validate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/cbor",
+        "X-CL-Proto": "1",
+      },
+      body: validateRequestCbor(licenseId, machineId, nonce, proof, 0, release),
+    });
+  }
+
+  async function validateTicket(
+    licenseId: number[],
+    machineId: number[],
+    privateKey: CryptoKey,
+    nonceByte: number,
+    release?: { releaseId: string; buildFp: string; variantId: number },
+  ): Promise<Map<number, TestCborValue>> {
+    const response = await validatePublicMachine(
+      licenseId,
+      machineId,
+      privateKey,
+      nonceByte,
+      release,
+    );
+    expect(response.status).toBe(200);
+    const envelope = cborMap(
+      decodeTestCbor(new Uint8Array(await response.arrayBuffer())),
+    );
+    expect(envelope.get(2)).toBe(3);
+    return cborIntMap(decodeTestCbor(cborBytes(envelope.get(3))));
+  }
+
+  async function restoreReleaseFixtures(): Promise<void> {
+    await env.DB.exec(
+      "UPDATE releases SET status = 'active', compromised_action = NULL, deprecated_at = NULL \
+       WHERE id = 'rel_1'",
+    );
+    await env.DB.exec("DELETE FROM security_floor_log");
+    await env.DB.exec(
+      "UPDATE policies SET offline_upgrade_policy = 'require_online', preload_variants_n = 3 \
+       WHERE id = 'policy_1'",
+    );
+    await env.DB.exec(
+      "UPDATE products SET alert_webhook_url = NULL, alert_suspicion_threshold = NULL \
+       WHERE id = 'product_1'",
+    );
+  }
+
+  it("registers releases idempotently and lists them without secret material", async () => {
+    await seedReleaseAdminProduct("product_rel");
+    const token = testAdminToken(101);
+    await seedAdminToken(token, ["releases:rw"]);
+    const seedHex = "ee".repeat(32);
+    const body = {
+      product_id: "product_rel",
+      app_version: "1.0.0",
+      build_fingerprint: "build-a",
+      channel: "stable",
+      manifest_root_hex: "01".repeat(32),
+      variant_seed_hex: seedHex,
+    };
+
+    const registered = await adminJson("/releases", "POST", token, body, "release-001");
+    expect(registered.status).toBe(201);
+    const created = await registered.json<Record<string, unknown>>();
+    const release = created.release as Record<string, unknown>;
+    expect(String(release.id)).toMatch(/^rel_[0-9a-f]{24}$/);
+    expect(release.variant_id).toBe(1);
+    expect(release.status).toBe("active");
+    expect(created.variant_reused).toBe(false);
+    // Neither the seed nor the encrypted variant parameters ever leave the server.
+    expect(JSON.stringify(created)).not.toContain(seedHex);
+    expect(JSON.stringify(created)).not.toContain("variant_params");
+
+    const replay = await adminJson("/releases", "POST", token, body, "release-001");
+    expect(replay.status).toBe(201);
+    const replayed = await replay.json<Record<string, unknown>>();
+    expect((replayed.release as Record<string, unknown>).id).toBe(release.id);
+
+    const again = await adminJson("/releases", "POST", token, body, "release-002");
+    expect(again.status).toBe(200);
+    const existing = await again.json<Record<string, unknown>>();
+    expect(existing.already_registered).toBe(true);
+    expect((existing.release as Record<string, unknown>).id).toBe(release.id);
+
+    const changed = await adminJson(
+      "/releases",
+      "POST",
+      token,
+      { ...body, app_version: "1.0.1" },
+      "release-003",
+    );
+    expect(changed.status).toBe(409);
+
+    const seedless = await adminJson(
+      "/releases",
+      "POST",
+      token,
+      { ...body, build_fingerprint: "build-b", variant_seed_hex: undefined },
+      "release-004",
+    );
+    expect(seedless.status).toBe(400);
+
+    const list = await adminJson("/releases?product_id=product_rel", "GET", token);
+    expect(list.status).toBe(200);
+    const listed = await list.json<{ items: Array<Record<string, unknown>> }>();
+    expect(listed.items).toHaveLength(1);
+    expect(listed.items[0].id).toBe(release.id);
+    expect(JSON.stringify(listed)).not.toContain("variant_params");
+
+    const show = await adminJson(
+      `/releases/${String(release.id)}?product_id=product_rel`,
+      "GET",
+      token,
+    );
+    expect(show.status).toBe(200);
+    expect(
+      (await adminJson("/releases/rel_unknown?product_id=product_rel", "GET", token)).status,
+    ).toBe(404);
+
+    const otherVendor = testAdminToken(112);
+    await seedAdminToken(otherVendor, ["releases:rw"], "vendor_2", "other-admin");
+    expect(
+      (await adminJson("/releases?product_id=product_rel", "GET", otherVendor)).status,
+    ).toBe(404);
+    expect((await adminJson("/releases", "POST", otherVendor, body, "release-005")).status).toBe(
+      404,
+    );
+
+    const wrongScope = testAdminToken(113);
+    await seedAdminToken(wrongScope, ["catalog:rw"]);
+    expect((await adminJson("/releases", "POST", wrongScope, body, "release-006")).status).toBe(
+      403,
+    );
+  });
+
+  it("deprecates a release after a dry-run impact report", async () => {
+    const { licenseId } = licenseObject(2_220);
+    const licenseKey = testLicenseKey(30);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    await env.DB.exec("DELETE FROM machines");
+    const nowSec = Math.floor(Date.now() / 1000);
+    for (const [machine, lastSeen] of [
+      [machineBytes(501), nowSec],
+      [machineBytes(502), nowSec - 10 * 86_400],
+    ] as const) {
+      await env.DB.prepare(
+        "INSERT INTO machines(\
+           id, license_id, fingerprint, status, activation_path, first_seen_at, last_seen_at, \
+           release_id, proj_version\
+         ) VALUES (?, ?, ?, 'active', 'online', ?, ?, 'rel_1', 1)",
+      )
+        .bind(
+          new Uint8Array(machine),
+          new Uint8Array(licenseId),
+          new Uint8Array(32).fill(5),
+          1,
+          lastSeen,
+        )
+        .run();
+    }
+    const activation = await activatePublic(licenseKey.value, 7);
+    expect(activation.response.status).toBe(200);
+    const machineId = [...cborBytes(activation.credential?.get(4))];
+
+    const token = testAdminToken(104);
+    await seedAdminToken(token, ["releases:rw"]);
+    const dryRun = await adminJson(
+      "/releases/rel_1/deprecate?product_id=product_1",
+      "POST",
+      token,
+    );
+    expect(dryRun.status).toBe(200);
+    const dryRunBody = await dryRun.json<Record<string, never>>();
+    expect(dryRunBody).toMatchObject({
+      dry_run: true,
+      action: "deprecate",
+      impact: { devices: 2, checkins_last_7d: 1 },
+      release: { id: "rel_1", status: "active" },
+    });
+
+    // A dry run must not mutate anything.
+    const show = await adminJson("/releases/rel_1?product_id=product_1", "GET", token);
+    expect((await show.json<{ release: { status: string } }>()).release.status).toBe("active");
+
+    const confirmed = await adminJson(
+      "/releases/rel_1/deprecate?product_id=product_1&dry_run=false",
+      "POST",
+      token,
+      undefined,
+      "deprecate-001",
+    );
+    expect(confirmed.status).toBe(200);
+    const confirmedBody = await confirmed.json<Record<string, never>>();
+    expect(confirmedBody).toMatchObject({
+      dry_run: false,
+      release: { id: "rel_1", status: "deprecated" },
+    });
+
+    const replay = await adminJson(
+      "/releases/rel_1/deprecate?product_id=product_1&dry_run=false",
+      "POST",
+      token,
+      undefined,
+      "deprecate-001",
+    );
+    expect(await replay.json()).toEqual(confirmedBody);
+
+    // A deprecated release still validates, but the ticket carries the marker.
+    const ticket = await validateTicket(licenseId, machineId, activation.keys.privateKey, 61);
+    expect(ticket.get(9)).toBe(0);
+    expect(ticket.get(14)).toBe(1);
+
+    const again = await adminJson(
+      "/releases/rel_1/deprecate?product_id=product_1&dry_run=false",
+      "POST",
+      token,
+      undefined,
+      "deprecate-002",
+    );
+    expect(again.status).toBe(409);
+
+    await restoreReleaseFixtures();
+  });
+
+  it("warns through the ticket and bumps the security floor when action is warn", async () => {
+    const { licenseId } = licenseObject(2_221);
+    const licenseKey = testLicenseKey(31);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    const activation = await activatePublic(licenseKey.value, 7);
+    expect(activation.response.status).toBe(200);
+    const machineId = [...cborBytes(activation.credential?.get(4))];
+
+    const token = testAdminToken(105);
+    await seedAdminToken(token, ["releases:rw"]);
+    const dryRun = await adminJson(
+      "/releases/rel_1/mark-compromised?product_id=product_1",
+      "POST",
+      token,
+      { action: "warn", bump_security_floor: true },
+    );
+    expect(dryRun.status).toBe(200);
+    const dryRunBody = await dryRun.json<Record<string, never>>();
+    expect(dryRunBody).toMatchObject({
+      dry_run: true,
+      action: "warn",
+      requires_acknowledgement: false,
+      security_floor: { current: 0, next: 1 },
+    });
+
+    const confirmed = await adminJson(
+      "/releases/rel_1/mark-compromised?product_id=product_1&dry_run=false",
+      "POST",
+      token,
+      { action: "warn", bump_security_floor: true },
+      "compromise-warn-001",
+    );
+    expect(confirmed.status).toBe(200);
+    expect(await confirmed.json<Record<string, unknown>>()).toMatchObject({
+      dry_run: false,
+      action: "warn",
+      security_floor: 1,
+    });
+
+    // warn: tickets keep flowing with the compromised marker and the raised floor.
+    const ticket = await validateTicket(licenseId, machineId, activation.keys.privateKey, 62);
+    expect(ticket.get(9)).toBe(0);
+    expect(ticket.get(13)).toBe(1);
+    expect(ticket.get(14)).toBe(2);
+
+    // warn does not block new activations.
+    const second = await activatePublic(licenseKey.value, 8);
+    expect(second.response.status).toBe(200);
+
+    await restoreReleaseFixtures();
+  });
+
+  it("rejects new activations and renewals when action is force_upgrade", async () => {
+    const { licenseId } = licenseObject(2_222);
+    const licenseKey = testLicenseKey(32);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    const activation = await activatePublic(licenseKey.value, 7);
+    expect(activation.response.status).toBe(200);
+    const machineId = [...cborBytes(activation.credential?.get(4))];
+
+    const token = testAdminToken(106);
+    await seedAdminToken(token, ["releases:rw"]);
+    const confirmed = await adminJson(
+      "/releases/rel_1/mark-compromised?product_id=product_1&dry_run=false",
+      "POST",
+      token,
+      { action: "force_upgrade" },
+      "compromise-upgrade-001",
+    );
+    expect(confirmed.status).toBe(200);
+
+    const blocked = await activatePublic(licenseKey.value, 8);
+    expect(blocked.response.status).toBe(403);
+    expect(await protocolErrorCode(blocked.response)).toBe(1009);
+
+    // Existing devices get a NeedsReactivation verdict, not a kill order.
+    const ticket = await validateTicket(licenseId, machineId, activation.keys.privateKey, 63);
+    expect(ticket.get(9)).toBe(1);
+    expect(ticket.get(14)).toBe(2);
+
+    await restoreReleaseFixtures();
+  });
+
+  it("kills devices at the next validation when action is revoke", async () => {
+    const { licenseId } = licenseObject(2_223);
+    const licenseKey = testLicenseKey(33);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    const activation = await activatePublic(licenseKey.value, 7);
+    expect(activation.response.status).toBe(200);
+    const machineId = [...cborBytes(activation.credential?.get(4))];
+
+    const token = testAdminToken(107);
+    await seedAdminToken(token, ["releases:rw"]);
+    const dryRun = await adminJson(
+      "/releases/rel_1/mark-compromised?product_id=product_1",
+      "POST",
+      token,
+      { action: "revoke" },
+    );
+    expect(dryRun.status).toBe(200);
+    expect(await dryRun.json<Record<string, unknown>>()).toMatchObject({
+      dry_run: true,
+      action: "revoke",
+      requires_acknowledgement: true,
+    });
+
+    // A confirmed revoke requires the in-body acknowledgement (double confirmation).
+    const unacknowledged = await adminJson(
+      "/releases/rel_1/mark-compromised?product_id=product_1&dry_run=false",
+      "POST",
+      token,
+      { action: "revoke" },
+      "compromise-revoke-001",
+    );
+    expect(unacknowledged.status).toBe(400);
+    expect(
+      (await unacknowledged.json<{ error: { code: string } }>()).error.code,
+    ).toBe("acknowledgement_required");
+
+    const confirmed = await adminJson(
+      "/releases/rel_1/mark-compromised?product_id=product_1&dry_run=false",
+      "POST",
+      token,
+      { action: "revoke", acknowledge_revoke: true },
+      "compromise-revoke-001",
+    );
+    expect(confirmed.status).toBe(200);
+
+    const blocked = await activatePublic(licenseKey.value, 8);
+    expect(blocked.response.status).toBe(403);
+    expect(await protocolErrorCode(blocked.response)).toBe(1009);
+
+    const kill = await validatePublicMachine(
+      licenseId,
+      machineId,
+      activation.keys.privateKey,
+      64,
+    );
+    expect(kill.status).toBe(200);
+    const envelope = cborMap(decodeTestCbor(new Uint8Array(await kill.arrayBuffer())));
+    expect(envelope.get(2)).toBe(4);
+
+    await restoreReleaseFixtures();
+  });
+
+  it("names the registration command when a release is not registered", async () => {
+    const { licenseId } = licenseObject(2_224);
+    const licenseKey = testLicenseKey(34);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+
+    const activation = await activatePublic(licenseKey.value, 7, {
+      releaseId: "rel_missing",
+      buildFp: "build-missing",
+      variantId: 9,
+    });
+    expect(activation.response.status).toBe(403);
+    const body = cborMap(
+      decodeTestCbor(new Uint8Array(await activation.response.arrayBuffer())),
+    );
+    expect(body.get(0)).toBe(1007);
+    const message = String(body.get(1));
+    expect(message).toContain("copylocker release register");
+    expect(message).toContain("--product product_1");
+    expect(message).toContain("--build-fingerprint build-missing");
+  });
+
+  it("preloads wrapped KEKs for the newest sibling release under preload_n", async () => {
+    const { licenseId } = licenseObject(2_225);
+    const licenseKey = testLicenseKey(35);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    await env.DB.exec(
+      "UPDATE policies SET offline_upgrade_policy = 'preload_n', preload_variants_n = 1 \
+       WHERE id = 'policy_1'",
+    );
+
+    const token = testAdminToken(108);
+    await seedAdminToken(token, ["releases:rw"]);
+    const registered = await adminJson(
+      "/releases",
+      "POST",
+      token,
+      {
+        product_id: productId,
+        app_version: "1.3.0",
+        build_fingerprint: "build-rel2",
+        channel: "stable",
+        variant_seed_hex: "ff".repeat(32),
+      },
+      "preload-register-001",
+    );
+    expect(registered.status).toBe(201);
+    const registeredBody = await registered.json<{
+      release: { id: string; variant_id: number };
+    }>();
+    const siblingVariant = registeredBody.release.variant_id;
+    expect(siblingVariant).toBeGreaterThan(1);
+
+    const kek = await adminJson(
+      "/asset-keks",
+      "POST",
+      token,
+      {
+        product_id: productId,
+        release_id: registeredBody.release.id,
+        feature_id: "feature.alpha",
+        kek_hex: "aa".repeat(32),
+      },
+      "preload-kek-001",
+    );
+    expect(kek.status).toBe(201);
+
+    const activation = await activatePublic(licenseKey.value, 7);
+    expect(activation.response.status).toBe(200);
+    const credential = activation.credential;
+    const wrapped = cborMap(credential?.get(21));
+    expect(cborBytes(wrapped.get("feature.alpha"))).toHaveLength(72);
+    const preloaded = cborMap(credential?.get(22));
+    const sibling = cborMap(preloaded.get(siblingVariant));
+    expect(cborBytes(sibling.get("feature.alpha"))).toHaveLength(72);
+
+    await restoreReleaseFixtures();
+  });
+
+  it("reuses the first active variant when the product is variant_stable", async () => {
+    const { licenseId } = licenseObject(2_226);
+    const licenseKey = testLicenseKey(36);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    await env.DB.exec(
+      "UPDATE policies SET offline_upgrade_policy = 'variant_stable' WHERE id = 'policy_1'",
+    );
+
+    const token = testAdminToken(109);
+    await seedAdminToken(token, ["releases:rw"]);
+    const registered = await adminJson(
+      "/releases",
+      "POST",
+      token,
+      {
+        product_id: productId,
+        app_version: "1.4.0",
+        build_fingerprint: "build-rel3",
+        channel: "stable",
+      },
+      "stable-register-001",
+    );
+    expect(registered.status).toBe(201);
+    const registeredBody = await registered.json<{
+      variant_reused: boolean;
+      release: { id: string; variant_id: number };
+      warnings: Array<{ id: string }>;
+    }>();
+    expect(registeredBody.variant_reused).toBe(true);
+    expect(registeredBody.release.variant_id).toBe(1);
+    expect(registeredBody.warnings.map((warning) => warning.id)).toContain("variant_stable");
+
+    // The reused variant validates end to end: activation on the new release resolves the
+    // first release's variant parameters.
+    const activation = await activatePublic(licenseKey.value, 7, {
+      releaseId: registeredBody.release.id,
+      buildFp: "build-rel3",
+      variantId: 1,
+    });
+    expect(activation.response.status).toBe(200);
+    expect(activation.credential?.get(20)).toBe(1);
+
+    await restoreReleaseFixtures();
+  });
+
+  it("scores fingerprint spread into the suspicion column and the ticket", async () => {
+    const { licenseId, stub } = licenseObject(2_227);
+    const licenseKey = testLicenseKey(37);
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes), 1);
+    const activation = await activatePublic(licenseKey.value, 7);
+    expect(activation.response.status).toBe(200);
+    const machineId = [...cborBytes(activation.credential?.get(4))];
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ suspicion: number }>(
+          "SELECT suspicion FROM activations WHERE machine_id = ?",
+          new Uint8Array(machineId),
+        )
+        .one();
+      expect(row.suspicion).toBe(0);
+    });
+
+    // Three extra fingerprints seen inside the 24h window on a one-seat license.
+    const nowSec = Math.floor(Date.now() / 1000);
+    await runInDurableObject(stub, async (_instance, state) => {
+      for (const marker of [81, 82, 83]) {
+        state.storage.sql.exec(
+          "INSERT INTO activations(\
+             machine_id, fingerprint, device_kem_ek, device_sig_vk, status, activation_path, \
+             created_at, last_seen_at\
+           ) VALUES (?, ?, ?, ?, 1, 'online', ?, ?)",
+          new Uint8Array(machineBytes(9_000 + marker)),
+          new Uint8Array(32).fill(marker),
+          new Uint8Array([1]),
+          new Uint8Array([2]),
+          nowSec,
+          nowSec,
+        );
+      }
+    });
+
+    // A configured threshold is crossed here; with no webhook URL the crossing is only
+    // recorded, and validation must not be disturbed either way.
+    await env.DB.exec(
+      "UPDATE products SET alert_suspicion_threshold = 40, \
+         alert_webhook_url = 'https://alerts.example.test/hook' WHERE id = 'product_1'",
+    );
+    const ticket = await validateTicket(licenseId, machineId, activation.keys.privateKey, 65);
+    expect(ticket.get(12)).toBe(40);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec<{ suspicion: number }>(
+          "SELECT suspicion FROM activations WHERE machine_id = ?",
+          new Uint8Array(machineId),
+        )
+        .one();
+      expect(row.suspicion).toBe(40);
+    });
+
+    await restoreReleaseFixtures();
+  });
+
+  it("configures the alert webhook and retries an undeliverable alert", async () => {
+    await seedReleaseAdminProduct("product_alertcfg");
+    const token = testAdminToken(110);
+    await seedAdminToken(token, ["products:rw"]);
+
+    const initial = await adminJson("/products/product_alertcfg/alert-webhook", "GET", token);
+    expect(initial.status).toBe(200);
+    expect(await initial.json<Record<string, unknown>>()).toMatchObject({
+      alert_webhook_url: null,
+      alert_suspicion_threshold: null,
+    });
+
+    const configured = await adminJson(
+      "/products/product_alertcfg/alert-webhook",
+      "PATCH",
+      token,
+      { url: "https://127.0.0.1:9/hook", threshold: 65 },
+      "alert-cfg-001",
+    );
+    expect(configured.status).toBe(200);
+    const readBack = await adminJson("/products/product_alertcfg/alert-webhook", "GET", token);
+    expect(await readBack.json<Record<string, unknown>>()).toMatchObject({
+      alert_webhook_url: "https://127.0.0.1:9/hook",
+      alert_suspicion_threshold: 65,
+    });
+
+    const replay = await adminJson(
+      "/products/product_alertcfg/alert-webhook",
+      "PATCH",
+      token,
+      { url: "https://127.0.0.1:9/hook", threshold: 65 },
+      "alert-cfg-001",
+    );
+    expect(replay.status).toBe(200);
+    const unchanged = await adminJson(
+      "/products/product_alertcfg/alert-webhook",
+      "PATCH",
+      token,
+      { url: "https://127.0.0.1:9/hook", threshold: 65 },
+      "alert-cfg-002",
+    );
+    expect(unchanged.status).toBe(409);
+    for (const invalid of [
+      { url: "http://insecure.example.test/hook" },
+      { url: "https://user:pw@alerts.example.test/hook" },
+      { threshold: 0 },
+      { threshold: 101 },
+    ]) {
+      expect(
+        (
+          await adminJson(
+            "/products/product_alertcfg/alert-webhook",
+            "PATCH",
+            token,
+            invalid,
+            `alert-cfg-bad-${JSON.stringify(invalid).length}`,
+          )
+        ).status,
+      ).toBe(400);
+    }
+
+    const wrongScope = testAdminToken(111);
+    await seedAdminToken(wrongScope, ["releases:rw"]);
+    expect(
+      (await adminJson("/products/product_alertcfg/alert-webhook", "GET", wrongScope)).status,
+    ).toBe(403);
+
+    // Delivery: an unreachable webhook is retried; an unconfigured product is only recorded.
+    const event = {
+      event: "suspicion_alert",
+      schema_version: 1,
+      occurred_at: 1_800_000_000,
+      product_id: "product_alertcfg",
+      license_id: "aa".repeat(16),
+      machine_id: "bb".repeat(16),
+      score: 88,
+      previous_score: 12,
+      threshold: 65,
+      contributions: [{ signal: "fingerprint_spread", points: 40, max: 40 }],
+    };
+    const failed = await dispatchEvents([event], "alert-fail");
+    expect(failed.retryMessages).toEqual([{ msgId: "alert-fail-0" }]);
+
+    await seedReleaseAdminProduct("product_plain");
+    const recordOnly = await dispatchEvents(
+      [{ ...event, product_id: "product_plain" }],
+      "alert-none",
+    );
+    expect(recordOnly.explicitAcks).toEqual(["alert-none-0"]);
+    expect(recordOnly.retryMessages).toEqual([]);
+
+    const malformed = await dispatchEvents(
+      [{ event: "suspicion_alert", schema_version: 1 }],
+      "alert-bad",
+    );
+    expect(malformed.explicitAcks).toEqual(["alert-bad-0"]);
+  });
+
+
+  // ----- M5-B: Mode E accounts and offline activation -----
+
+  function accountLoginCbor(
+    product: string,
+    email: string,
+    password: string,
+  ): Uint8Array {
+    return encodeTestCbor(
+      new Map<number, TestCborValue>([
+        [0, 1],
+        [1, product],
+        [2, email],
+        [3, password],
+      ]),
+    );
+  }
+
+  function accountTokenCbor(token: Uint8Array): Uint8Array {
+    return encodeTestCbor(
+      new Map<number, TestCborValue>([
+        [0, 1],
+        [1, token],
+      ]),
+    );
+  }
+
+  function postAccount(path: string, body: Uint8Array): Promise<Response> {
+    return exports.default.fetch(`https://copylocker.test/v1/account/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/cbor", "X-CL-Proto": "1" },
+      body: body.slice(),
+    });
+  }
+
+  type AccountSession = {
+    accountToken: Uint8Array;
+    refreshToken: Uint8Array;
+    expiresAt: number;
+    refreshExpiresAt: number;
+  };
+
+  async function loginSession(
+    product: string,
+    email: string,
+    password: string,
+  ): Promise<AccountSession> {
+    const response = await postAccount(
+      "login",
+      accountLoginCbor(product, email, password),
+    );
+    expect(response.status).toBe(200);
+    const body = cborMap(
+      decodeTestCbor(new Uint8Array(await response.arrayBuffer())),
+    );
+    return {
+      accountToken: cborBytes(body.get(0)),
+      refreshToken: cborBytes(body.get(1)),
+      expiresAt: Number(body.get(2)),
+      refreshExpiresAt: Number(body.get(3)),
+    };
+  }
+
+  async function createAccount(
+    token: string,
+    product: string,
+    email: string,
+    password: string,
+    idempotencyKey: string,
+    maxDevices?: number,
+  ): Promise<Response> {
+    return adminJson(
+      "/accounts",
+      "POST",
+      token,
+      {
+        product_id: product,
+        email,
+        password,
+        max_devices: maxDevices,
+      },
+      idempotencyKey,
+    );
+  }
+
+  async function accountActivationCbor(
+    deviceKemEk: number[],
+    keys: DeviceKeys,
+    accountToken: Uint8Array,
+    fingerprintByte = 7,
+  ): Promise<Uint8Array> {
+    const nonce = new Array<number>(32).fill(71);
+    const request = activationRequestWithoutProof(
+      deviceKemEk,
+      keys.verifyingKey,
+      nonce,
+    );
+    request.set(3, new Map<number, TestCborValue>([[1, accountToken]]));
+    request.set(4, new Uint8Array(32).fill(fingerprintByte));
+    const proofInput = encodeTestCbor(request);
+    request.set(
+      12,
+      new Uint8Array(await signDeviceProof("ar", proofInput, keys.privateKey)),
+    );
+    return encodeTestCbor(request);
+  }
+
+  function postOfflineRequest(
+    body: Uint8Array,
+    idempotencyKey?: string,
+  ): Promise<Response> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/cbor",
+      "X-CL-Proto": "1",
+    };
+    if (idempotencyKey !== undefined) {
+      headers["Idempotency-Key"] = idempotencyKey;
+    }
+    return exports.default.fetch("https://copylocker.test/v1/offline/request", {
+      method: "POST",
+      headers,
+      body: body.slice(),
+    });
+  }
+
+  const CROCKFORD_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+  function crockfordDecode(payload: string): Uint8Array {
+    const output: number[] = [];
+    let buffer = 0;
+    let bits = 0;
+    for (const character of payload) {
+      const value = CROCKFORD_ALPHABET.indexOf(character);
+      if (value < 0) throw new Error("invalid Crockford character");
+      buffer = (buffer << 5) | value;
+      bits += 5;
+      if (bits >= 8) {
+        bits -= 8;
+        output.push((buffer >> bits) & 0xff);
+        buffer &= (1 << bits) - 1;
+      }
+    }
+    return new Uint8Array(output);
+  }
+
+  function decodeArmor(armor: string): Map<number, TestCborValue> {
+    expect(armor.startsWith("CLK1:")).toBe(true);
+    return cborIntMap(decodeTestCbor(crockfordDecode(armor.slice(5))));
+  }
+
+  it("creates accounts, throttles login failures, and rotates sessions", async () => {
+    await seedReleaseAdminProduct("product_1");
+    const token = testAdminToken(120);
+    await seedAdminToken(token, ["accounts:rw"]);
+
+    const email = "mode-e-lifecycle@example.test";
+    const password = "correct horse battery staple";
+    const created = await createAccount(
+      token,
+      "product_1",
+      email,
+      password,
+      "account-create-001",
+      2,
+    );
+    expect(created.status).toBe(201);
+    const createdBody = await created.json<Record<string, unknown>>();
+    const account = createdBody.account as Record<string, unknown>;
+    expect(String(account.id)).toMatch(/^acct_[0-9a-f]{32}$/);
+    expect(account.email).toBe(email);
+    expect(account.max_devices).toBe(2);
+    expect(JSON.stringify(createdBody)).not.toContain(password);
+    expect(JSON.stringify(createdBody)).not.toContain("pwd_hash");
+
+    const replay = await createAccount(
+      token,
+      "product_1",
+      email,
+      password,
+      "account-create-001",
+      2,
+    );
+    expect(replay.status).toBe(201);
+    expect(
+      ((await replay.json<Record<string, unknown>>()).account as Record<string, unknown>)
+        .id,
+    ).toBe(account.id);
+
+    const duplicate = await createAccount(
+      token,
+      "product_1",
+      email,
+      password,
+      "account-create-002",
+    );
+    expect(duplicate.status).toBe(409);
+
+    const shortPassword = await createAccount(
+      token,
+      "product_1",
+      "short-pw@example.test",
+      "too short",
+      "account-create-003",
+    );
+    expect(shortPassword.status).toBe(400);
+    const listed = await adminJson("/accounts?product_id=product_1", "GET", token);
+    expect(listed.status).toBe(200);
+    const items = (await listed.json<{ items: Array<Record<string, unknown>> }>()).items;
+    expect(items.some((item) => item.id === account.id)).toBe(true);
+    expect(JSON.stringify(items)).not.toContain("pwd_hash");
+
+    const wrongScope = testAdminToken(121);
+    await seedAdminToken(wrongScope, ["licenses:rw"]);
+    expect(
+      (
+        await createAccount(
+          wrongScope,
+          "product_1",
+          "scope@example.test",
+          password,
+          "account-create-004",
+        )
+      ).status,
+    ).toBe(403);
+
+    const wrongPassword = await postAccount(
+      "login",
+      accountLoginCbor("product_1", email, "wrong password here"),
+    );
+    expect(wrongPassword.status).toBe(401);
+    expect(await protocolErrorCode(wrongPassword)).toBe(1003);
+
+    const unknown = await postAccount(
+      "login",
+      accountLoginCbor("product_1", "nobody@example.test", password),
+    );
+    expect(unknown.status).toBe(401);
+
+    const session = await loginSession("product_1", email, password);
+    expect(session.accountToken).toHaveLength(32);
+    expect(session.refreshToken).toHaveLength(32);
+    expect(session.refreshExpiresAt).toBeGreaterThan(session.expiresAt);
+
+    const refreshed = await postAccount("refresh", accountTokenCbor(session.refreshToken));
+    expect(refreshed.status).toBe(200);
+    const refreshedBody = cborMap(
+      decodeTestCbor(new Uint8Array(await refreshed.arrayBuffer())),
+    );
+    const rotatedRefresh = cborBytes(refreshedBody.get(1));
+    expect([...rotatedRefresh]).not.toEqual([...session.refreshToken]);
+
+    const replayedRefresh = await postAccount(
+      "refresh",
+      accountTokenCbor(session.refreshToken),
+    );
+    expect(replayedRefresh.status).toBe(401);
+
+    const loggedOut = await postAccount("logout", accountTokenCbor(rotatedRefresh));
+    expect(loggedOut.status).toBe(200);
+    const afterLogout = await postAccount("refresh", accountTokenCbor(rotatedRefresh));
+    expect(afterLogout.status).toBe(401);
+    // Logout is idempotent and does not leak whether the token existed.
+    const again = await postAccount("logout", accountTokenCbor(rotatedRefresh));
+    expect(again.status).toBe(200);
+
+    // Login throttle: ten failures inside the window lock further attempts out.
+    const throttleEmail = "mode-e-throttle@example.test";
+    await createAccount(token, "product_1", throttleEmail, password, "account-create-005");
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const failed = await postAccount(
+        "login",
+        accountLoginCbor("product_1", throttleEmail, `wrong-${attempt}-password`),
+      );
+      expect(failed.status).toBe(401);
+    }
+    const throttled = await postAccount(
+      "login",
+      accountLoginCbor("product_1", throttleEmail, password),
+    );
+    expect(throttled.status).toBe(429);
+    expect(await protocolErrorCode(throttled)).toBe(1005);
+    const throttledRetry = await postAccount(
+      "login",
+      accountLoginCbor("product_1", throttleEmail, password),
+    );
+    const throttledBody = cborMap(
+      decodeTestCbor(new Uint8Array(await throttledRetry.arrayBuffer())),
+    );
+    expect(Number(throttledBody.get(2))).toBeGreaterThan(0);
+  });
+
+  it("enforces the account concurrent session limit", async () => {
+    await seedReleaseAdminProduct("product_1");
+    const token = testAdminToken(122);
+    await seedAdminToken(token, ["accounts:rw"]);
+    const email = "mode-e-devices@example.test";
+    const password = "device limit password";
+    await createAccount(token, "product_1", email, password, "account-limit-001", 1);
+
+    const first = await postAccount("login", accountLoginCbor("product_1", email, password));
+    expect(first.status).toBe(200);
+    const second = await postAccount("login", accountLoginCbor("product_1", email, password));
+    expect(second.status).toBe(409);
+    expect(await protocolErrorCode(second)).toBe(1001);
+  });
+
+  async function seedModeELicense(
+    licenseId: number[],
+    keyHmac?: Uint8Array,
+  ): Promise<void> {
+    await seedProjectedLicense(licenseId, keyHmac);
+    await env.DB.prepare(
+      "UPDATE policies SET mode = 1, refresh_after_sec = 3600, grace_seconds = 7200 \
+       WHERE id = 'policy_1'",
+    ).run();
+  }
+
+  async function resetModeEFixtures(): Promise<void> {
+    await env.DB.prepare(
+      "UPDATE policies SET mode = 0, refresh_after_sec = 3600, grace_seconds = 3600, \
+       allow_olk = 0, allow_unbound_olk = 0 WHERE id = 'policy_1'",
+    ).run();
+  }
+
+  it("activates with an account token and rejects license keys in Mode E", async () => {
+    const { licenseId } = licenseObject(2_300);
+    const licenseKey = testLicenseKey(40);
+    await seedModeELicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    const token = testAdminToken(123);
+    await seedAdminToken(token, ["accounts:rw", "licenses:rw"]);
+    const email = "mode-e-activate@example.test";
+    const password = "activation password one";
+    const created = await createAccount(
+      token,
+      "product_1",
+      email,
+      password,
+      "account-activate-001",
+    );
+    const accountId = String(
+      ((await created.json<Record<string, unknown>>()).account as Record<string, unknown>).id,
+    );
+    await env.DB.prepare("UPDATE licenses SET account_id = ? WHERE id = ?")
+      .bind(accountId, new Uint8Array(licenseId))
+      .run();
+
+    // Mode E never accepts a license key for first activation.
+    const licenseKeyAttempt = await activatePublic(licenseKey.value, 7);
+    expect(licenseKeyAttempt.response.status).toBe(401);
+    expect(await protocolErrorCode(licenseKeyAttempt.response)).toBe(1003);
+
+    const session = await loginSession("product_1", email, password);
+    const keys = await generateDeviceKeys();
+    const body = await accountActivationCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      keys,
+      session.accountToken,
+    );
+    const activated = await postActivation(body, "account-activate-flow-1");
+    expect(activated.status).toBe(200);
+    const envelope = cborMap(
+      decodeTestCbor(new Uint8Array(await activated.arrayBuffer())),
+    );
+    expect(envelope.get(2)).toBe(2);
+    const credential = cborMap(decodeTestCbor(cborBytes(envelope.get(3))));
+    // Mode 1 (enforced_online), policy refresh/grace, and the account-bound license id.
+    expect(credential.get(14)).toBe(1);
+    expect(credential.get(3)).toEqual(new Uint8Array(licenseId));
+    const issuedAt = Number(credential.get(10));
+    expect(Number(credential.get(12)) - issuedAt).toBeLessThanOrEqual(3600 + 120);
+    expect(credential.get(13)).toBe(7200);
+    const machineId = [...cborBytes(credential.get(4))];
+
+    // Online validation keeps flowing: coming back online yields a fresh ticket.
+    const ticket = await validateTicket(licenseId, machineId, keys.privateKey, 81);
+    expect(ticket.get(9)).toBe(0);
+
+    // The LicenseDO records the account activation path.
+    const { stub } = licenseObject(2_300);
+    const storedPath = await runInDurableObject(stub, async (_instance, state) =>
+      state.storage.sql
+        .exec<{ activation_path: string }>(
+          "SELECT activation_path FROM activations WHERE status = 0",
+        )
+        .toArray()
+        .map((row) => row.activation_path),
+    );
+    expect(storedPath).toEqual(["account"]);
+
+    // A garbage account token cannot activate.
+    const garbage = new Uint8Array(32).fill(9);
+    const garbageKeys = await generateDeviceKeys();
+    const garbageBody = await accountActivationCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      garbageKeys,
+      garbage,
+    );
+    const rejected = await postActivation(garbageBody, "account-activate-garbage");
+    expect(rejected.status).toBe(401);
+    expect(await protocolErrorCode(rejected)).toBe(1003);
+
+    // After logout the session token stops activating new devices.
+    await postAccount("logout", accountTokenCbor(session.refreshToken));
+    const loggedOutKeys = await generateDeviceKeys();
+    const loggedOutBody = await accountActivationCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      loggedOutKeys,
+      session.accountToken,
+      8,
+    );
+    const loggedOutAttempt = await postActivation(
+      loggedOutBody,
+      "account-activate-logged-out",
+    );
+    expect(loggedOutAttempt.status).toBe(401);
+
+    await resetModeEFixtures();
+  });
+
+  it("answers offline activation requests with a signed activation response", async () => {
+    const { licenseId } = licenseObject(2_301);
+    const licenseKey = testLicenseKey(41);
+    await resetModeEFixtures();
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes), 1);
+
+    const keys = await generateDeviceKeys();
+    const body = await activationRequestCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      keys,
+      7,
+      licenseKey.value,
+    );
+    const missingKey = await postOfflineRequest(body);
+    expect(missingKey.status).toBe(400);
+
+    const response = await postOfflineRequest(body, "offline-ar-001");
+    expect(response.status).toBe(200);
+    const responseBytes = new Uint8Array(await response.arrayBuffer());
+    const envelope = cborMap(decodeTestCbor(responseBytes));
+    expect(envelope.get(2)).toBe(9);
+    const activationResponse = cborMap(decodeTestCbor(cborBytes(envelope.get(3))));
+    expect(activationResponse.get(0)).toBe(1);
+    expect(activationResponse.get(2)).toEqual(new Uint8Array(32).fill(71));
+    expect(Number(activationResponse.get(6))).toBeGreaterThan(
+      Number(activationResponse.get(5)),
+    );
+    const chain = activationResponse.get(4) as TestCborValue[];
+    expect(Array.isArray(chain)).toBe(true);
+    expect(chain.length).toBeGreaterThan(0);
+
+    // data-model §13: the signed activation response is archived in R2 at
+    // offline/<license_id>/<nonce>.aresp with byte-identical content.
+    const archiveKey = `offline/${hexId(licenseId)}/${hexId(new Array<number>(32).fill(71))}.aresp`;
+    const archived = await env.ARCHIVE.get(archiveKey);
+    expect(archived).not.toBeNull();
+    expect(new Uint8Array(await archived!.arrayBuffer())).toEqual(responseBytes);
+
+    // An idempotent replay returns and re-archives the identical bytes.
+    const replay = await postOfflineRequest(body, "offline-ar-001");
+    expect(replay.status).toBe(200);
+    expect(new Uint8Array(await replay.arrayBuffer())).toEqual(responseBytes);
+    const archivedReplay = await env.ARCHIVE.get(archiveKey);
+    expect(new Uint8Array(await archivedReplay!.arrayBuffer())).toEqual(responseBytes);
+
+    // The wrapped credential is a real machine credential for the same license.
+    const credentialEnvelope = cborMap(
+      decodeTestCbor(cborBytes(activationResponse.get(3))),
+    );
+    expect(credentialEnvelope.get(2)).toBe(2);
+    const credential = cborMap(decodeTestCbor(cborBytes(credentialEnvelope.get(3))));
+    expect(credential.get(3)).toEqual(new Uint8Array(licenseId));
+    expect(credential.get(14)).toBe(0);
+
+    // The seat is consumed: a second device on a one-seat license is rejected.
+    const secondKeys = await generateDeviceKeys();
+    const secondBody = await activationRequestCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      secondKeys,
+      8,
+      licenseKey.value,
+    );
+    const exhausted = await postOfflineRequest(secondBody, "offline-ar-002");
+    expect(exhausted.status).toBe(409);
+    expect(await protocolErrorCode(exhausted)).toBe(1001);
+  });
+
+  it("returns the archived original when an offline request replays across time", async () => {
+    const { licenseId } = licenseObject(2_304);
+    const licenseKey = testLicenseKey(46);
+    await resetModeEFixtures();
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes), 1);
+
+    const keys = await generateDeviceKeys();
+    const body = await activationRequestCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      keys,
+      7,
+      licenseKey.value,
+    );
+    // A previous attempt already archived a differently-signed envelope for this exact
+    // (license, nonce) request: the outer ActivationResponse embeds `server_time`, so a
+    // cross-second replay re-signs around the identical journaled credential. The relay
+    // must receive the archived original byte-identically, never a 500.
+    const archiveKey = `offline/${hexId(licenseId)}/${hexId(new Array<number>(32).fill(71))}.aresp`;
+    const archivedOriginal = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+    await env.ARCHIVE.put(archiveKey, archivedOriginal);
+
+    const response = await postOfflineRequest(body, "offline-ar-replay-001");
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(archivedOriginal);
+    const archived = await env.ARCHIVE.get(archiveKey);
+    expect(new Uint8Array(await archived!.arrayBuffer())).toEqual(archivedOriginal);
+  });
+
+  it("refuses the offline relay for enforced-online policies", async () => {
+    const { licenseId } = licenseObject(2_302);
+    const licenseKey = testLicenseKey(42);
+    await seedModeELicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    const body = await activationRequestCbor(
+      hexBytes(env.TEST_DEVICE_KEM_EK),
+      await generateDeviceKeys(),
+      7,
+      licenseKey.value,
+    );
+    const response = await postOfflineRequest(body, "offline-ar-mode-e");
+    expect(response.status).toBe(401);
+    expect(await protocolErrorCode(response)).toBe(1003);
+    await resetModeEFixtures();
+  });
+
+  it("issues offline license keys with policy gates and idempotent replay", async () => {
+    const { licenseId } = licenseObject(2_303);
+    const licenseKey = testLicenseKey(43);
+    await resetModeEFixtures();
+    await seedProjectedLicense(licenseId, await activationKeyHmac(licenseKey.bytes));
+    const token = testAdminToken(124);
+    await seedAdminToken(token, ["licenses:rw"]);
+
+    // OLK issuance is gated behind an explicit policy flag.
+    const gated = await adminJson(
+      `/licenses/${hexId(licenseId)}/offline-key`,
+      "POST",
+      token,
+      { release_id: "rel_1", bound_fingerprint_hex: "07".repeat(32) },
+      "olk-gated-001",
+    );
+    expect(gated.status).toBe(422);
+    expect((await gated.json<{ error: { code: string } }>()).error.code).toBe(
+      "olk_not_allowed",
+    );
+
+    await env.DB.prepare(
+      "UPDATE policies SET allow_olk = 1 WHERE id = 'policy_1'",
+    ).run();
+
+    // Unbound keys need a second explicit flag.
+    const unbound = await adminJson(
+      `/licenses/${hexId(licenseId)}/offline-key`,
+      "POST",
+      token,
+      { release_id: "rel_1" },
+      "olk-unbound-001",
+    );
+    expect(unbound.status).toBe(422);
+    expect((await unbound.json<{ error: { code: string } }>()).error.code).toBe(
+      "unbound_olk_not_allowed",
+    );
+
+    const issued = await adminJson(
+      `/licenses/${hexId(licenseId)}/offline-key`,
+      "POST",
+      token,
+      {
+        release_id: "rel_1",
+        bound_fingerprint_hex: "07".repeat(32),
+        max_seats: 2,
+      },
+      "olk-issue-001",
+    );
+    expect(issued.status).toBe(201);
+    const issuedBody = await issued.json<Record<string, unknown>>();
+    const armor = String(issuedBody.armor);
+    expect(issuedBody.bound).toBe(true);
+    expect(issuedBody.variant_id).toBe(1);
+
+    const bundle = decodeArmor(armor);
+    expect(bundle.get(0)).toBe(1);
+    const chain = bundle.get(2) as TestCborValue[];
+    expect(chain.length).toBeGreaterThan(0);
+    const olkEnvelope = cborMap(decodeTestCbor(cborBytes(bundle.get(1))));
+    expect(olkEnvelope.get(2)).toBe(6);
+    const olk = cborMap(decodeTestCbor(cborBytes(olkEnvelope.get(3))));
+    expect(olk.get(3)).toEqual(new Uint8Array(licenseId));
+    expect(olk.get(7)).toEqual(new Uint8Array(32).fill(7));
+    expect(olk.get(8)).toBe(2);
+    expect(olk.get(9)).toEqual(new Uint8Array(8).fill(3));
+    expect(olk.get(13)).toBe("build-validate");
+    expect(olk.get(14)).toBe(1);
+    const wrapped = cborMap(olk.get(17) as unknown);
+    expect([...wrapped.keys()]).toContain("feature.alpha");
+
+    // Idempotent replay returns the identical bundle instead of minting a new seed.
+    const replay = await adminJson(
+      `/licenses/${hexId(licenseId)}/offline-key`,
+      "POST",
+      token,
+      {
+        release_id: "rel_1",
+        bound_fingerprint_hex: "07".repeat(32),
+        max_seats: 2,
+      },
+      "olk-issue-001",
+    );
+    expect(replay.status).toBe(201);
+    expect(String((await replay.json<Record<string, unknown>>()).armor)).toBe(armor);
+
+    const unknownLicense = await adminJson(
+      `/licenses/${"ee".repeat(16)}/offline-key`,
+      "POST",
+      token,
+      { release_id: "rel_1", bound_fingerprint_hex: "07".repeat(32) },
+      "olk-unknown-001",
+    );
+    expect(unknownLicense.status).toBe(404);
+
+    const otherVendor = testAdminToken(125);
+    await seedAdminToken(otherVendor, ["licenses:rw"], "vendor_2", "other-admin");
+    const foreign = await adminJson(
+      `/licenses/${hexId(licenseId)}/offline-key`,
+      "POST",
+      otherVendor,
+      { release_id: "rel_1", bound_fingerprint_hex: "07".repeat(32) },
+      "olk-foreign-001",
+    );
+    expect(foreign.status).toBe(404);
+
+    const wrongScope = testAdminToken(126);
+    await seedAdminToken(wrongScope, ["catalog:rw"]);
+    const forbidden = await adminJson(
+      `/licenses/${hexId(licenseId)}/offline-key`,
+      "POST",
+      wrongScope,
+      { release_id: "rel_1", bound_fingerprint_hex: "07".repeat(32) },
+      "olk-scope-001",
+    );
+    expect(forbidden.status).toBe(403);
+
+    await resetModeEFixtures();
+  });
+
   const schemas = [
     {
       className: "LicenseDO",
@@ -4975,7 +7045,7 @@ describe("worker runtime", () => {
     {
       className: "AccountDO",
       namespace: () => env.ACCOUNT,
-      schemaVersion: 1,
+      schemaVersion: 2,
       tables: ["_sql_schema_migrations", "login_attempts", "sessions"],
     },
     {
@@ -5011,4 +7081,1606 @@ describe("worker runtime", () => {
       expect(tables).toEqual([...schema.tables].sort());
     });
   }
+
+  // ----- M6: analytics detail stream, T1 telemetry consumption, daily rollup -----
+
+  type AnalyticsDetailTestEvent = {
+    event: "analytics_detail";
+    schema_version: 1;
+    record_id: string;
+    occurred_at: number;
+    kind: "check_in" | "activation";
+    product_id: string;
+    machine_key: number[];
+    app_version: string;
+    os: string;
+    arch: string;
+    country?: string;
+    activation_path: string;
+    mode: "O" | "E";
+    release_id: string;
+    policy_id: string;
+    sdk_version: string;
+    reused?: boolean;
+    telemetry?: {
+      consent_version: number;
+      window_start: number;
+      session_count: number;
+      session_duration_histogram: number[];
+      feature_hits: Record<string, number>;
+      days_active: number;
+    };
+    telemetry_dropped?: "no_consent" | "tier_gate";
+    clip_events?: string[];
+  };
+
+  function analyticsDetailEvent(
+    overrides: Partial<AnalyticsDetailTestEvent> = {},
+  ): AnalyticsDetailTestEvent {
+    return {
+      event: "analytics_detail",
+      schema_version: 1,
+      record_id: "ab".repeat(16),
+      occurred_at: 1_800_000_000,
+      kind: "check_in",
+      product_id: productId,
+      machine_key: new Array<number>(32).fill(5),
+      app_version: "1.2.3",
+      os: "macos",
+      arch: "arm64",
+      country: "DE",
+      activation_path: "online",
+      mode: "O",
+      release_id: "rel_1",
+      policy_id: "policy_1",
+      sdk_version: "0.1.0",
+      ...overrides,
+    };
+  }
+
+  function analyticsR2Key(record: AnalyticsDetailTestEvent, date?: string): string {
+    const day = date ?? new Date(record.occurred_at * 1000).toISOString().slice(0, 10);
+    return `analytics/raw/${record.product_id}/${day}/${record.record_id}.json`;
+  }
+
+  async function runScheduledCron(cron?: string): Promise<void> {
+    const context = createExecutionContext();
+    const worker = new WorkerEntrypoint(context, env);
+    await worker.scheduled(
+      createScheduledController(cron === undefined ? undefined : { cron }),
+    );
+  }
+
+  async function analyticsTableSnapshot() {
+    const rollup = (
+      await env.DB.prepare(
+        "SELECT * FROM analytics_rollup ORDER BY product_id, date, metric_id, dims_json",
+      ).all()
+    ).results;
+    const hll = (
+      await env.DB.prepare(
+        "SELECT product_id, date, cube_key, sketch FROM analytics_hll \
+         ORDER BY product_id, date, cube_key",
+      ).all<{ product_id: string; date: string; cube_key: string; sketch: ArrayBuffer | number[] }>()
+    ).results.map(({ sketch, ...rest }) => ({
+      ...rest,
+      sketch: Array.from(new Uint8Array(sketch)),
+    }));
+    const telemetry = (
+      await env.DB.prepare(
+        "SELECT * FROM telemetry_rollup ORDER BY product_id, date, metric_id, dims_json",
+      ).all()
+    ).results;
+    return { rollup, hll, telemetry };
+  }
+
+  it("consumes proof-covered telemetry on validate without ever failing the request", async () => {
+    const { licenseId, stub } = licenseObject(1_030);
+    const keys = await generateDeviceKeys();
+    await seedProjectedLicense(licenseId);
+    // Drop the registered asset KEKs so the ticket needs no credential state fixture
+    // (the `encryptedCredentialState` KAT is bound to another license id's AAD).
+    await env.DB.prepare("DELETE FROM release_feature_keks WHERE product_id = ?")
+      .bind("product_1")
+      .run();
+    await initLicense(stub, licenseId, 1);
+    const reserved = await postJson(stub, "/reserve", {
+      ...reserveBody(30, "telemetry-reserve", keys.verifyingKey),
+      fingerprint: new Array<number>(32).fill(7),
+      build_fp: "build-validate",
+    });
+    expect(reserved.status).toBe(201);
+    const reservation = await reserved.json<ReserveResult>();
+    expect((await postJson(stub, "/commit", { machine_id: reservation.machine_id })).status).toBe(
+      200,
+    );
+
+    const validate = (
+      nonceByte: number,
+      telemetry?: Map<number, TestCborValue>,
+      proofTelemetry?: Map<number, TestCborValue>,
+    ): Promise<Response> => {
+      const nonce = new Array<number>(32).fill(nonceByte);
+      const proofInput = validateProofInput(
+        licenseId,
+        reservation.machine_id,
+        nonce,
+        0,
+        undefined,
+        proofTelemetry ?? telemetry,
+      );
+      return signDeviceProof("validate-request", proofInput, keys.privateKey).then((proof) =>
+        exports.default.fetch("https://copylocker.test/v1/validate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/cbor",
+            "X-CL-Proto": "1",
+          },
+          body: validateRequestCbor(
+            licenseId,
+            reservation.machine_id,
+            nonce,
+            proof,
+            0,
+            undefined,
+            telemetry,
+          ),
+        }),
+      );
+    };
+
+    // Tier gate: the seeded policy defaults to telemetry_tier 'T0', so the block is
+    // dropped; the validate itself must succeed either way.
+    const tierGated = await validate(
+      71,
+      telemetryCborValue({ consentVersion: 3, sessionCount: 5 }),
+    );
+    expect(tierGated.status).toBe(200);
+    expect(tierGated.headers.get("content-type")).toBe("application/cbor");
+
+    // With T1 enabled, a consent_version = 0 block is dropped (and counted downstream);
+    // the validate still succeeds.
+    await env.DB.prepare(
+      "UPDATE policies SET telemetry_tier = 'T1' WHERE id = ? AND product_id = ?",
+    )
+      .bind("policy_1", "product_1")
+      .run();
+    const noConsent = await validate(
+      72,
+      telemetryCborValue({ consentVersion: 0, sessionCount: 5 }),
+    );
+    expect(noConsent.status).toBe(200);
+
+    // Poisoned session_count = 10^9 arrives clipped and counted; the ticket is signed.
+    const poisoned = await validate(
+      73,
+      telemetryCborValue({ consentVersion: 3, sessionCount: 1_000_000_000 }),
+    );
+    expect(poisoned.status).toBe(200);
+    const envelope = cborMap(
+      decodeTestCbor(new Uint8Array(await poisoned.arrayBuffer())),
+    );
+    expect(envelope.get(2)).toBe(3);
+    expect(
+      await verifyFastArtifact(
+        "validation-ticket",
+        cborBytes(envelope.get(3)),
+        cborBytes(envelope.get(4)),
+      ),
+    ).toBe(true);
+
+    // The telemetry block is covered by the device proof: a proof computed over one
+    // block does not validate a request carrying another.
+    const forged = await validate(
+      74,
+      telemetryCborValue({ consentVersion: 3, sessionCount: 6 }),
+      telemetryCborValue({ consentVersion: 3, sessionCount: 5 }),
+    );
+    expect(forged.status).toBe(403);
+  });
+
+  it("archives analytics detail events to R2 idempotently", async () => {
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    const event = analyticsDetailEvent({
+      telemetry: {
+        consent_version: 3,
+        window_start: 1_799_000_000,
+        session_count: 10_000,
+        session_duration_histogram: [10, 5, 2, 0],
+        feature_hits: { "feature.alpha": 7 },
+        days_active: 9,
+      },
+      clip_events: ["session_count_clipped"],
+    });
+    const key = analyticsR2Key(event);
+
+    const first = await dispatchEvents([event], "analytics");
+    expect(first.explicitAcks).toEqual(["analytics-0"]);
+    expect(first.retryMessages).toEqual([]);
+
+    const object = await env.ARCHIVE.get(key);
+    expect(object).not.toBeNull();
+    if (object === null) {
+      throw new Error("analytics detail record was not written");
+    }
+    const archived = JSON.parse(await object.text()) as AnalyticsDetailTestEvent;
+    expect(archived.machine_key).toEqual(event.machine_key);
+    expect(archived.telemetry?.session_count).toBe(10_000);
+    expect(archived.clip_events).toEqual(["session_count_clipped"]);
+
+    // A queue redelivery rewrites identical bytes under the same key.
+    const replay = await dispatchEvents([event], "analytics-replay");
+    expect(replay.explicitAcks).toEqual(["analytics-replay-0"]);
+    expect(
+      (await env.ARCHIVE.list({ prefix: "analytics/raw/" })).objects.map(({ key }) => key),
+    ).toEqual([key]);
+
+    // Malformed events are acked without touching R2.
+    const malformed = await dispatchEvents(
+      [{ event: "analytics_detail", schema_version: 1 }],
+      "analytics-bad",
+    );
+    expect(malformed.explicitAcks).toEqual(["analytics-bad-0"]);
+    expect((await env.ARCHIVE.list({ prefix: "analytics/raw/" })).objects).toHaveLength(1);
+
+    // A conflicting record under the same immutable key is retried, never overwritten.
+    const conflict = await dispatchEvents([{ ...event, os: "linux" }], "analytics-conflict");
+    expect(conflict.explicitAcks).toEqual([]);
+    expect(conflict.retryMessages).toEqual([{ msgId: "analytics-conflict-0" }]);
+  });
+
+  it("survives the platform JSON round-trip between queue producer and consumer", async () => {
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    // Regression test for the serde_bytes queue bug (events.rs `machine_key`): every
+    // other consumer test drives `dispatchEvents` with in-memory JsValues, bypassing
+    // the JSON round-trip the platform applies to queue payloads (producer
+    // `serde_wasm_bindgen::to_value` under `QueueContentType::Json` → `JSON.stringify`
+    // → transport → consumer `serde_wasm_bindgen::from_value`). With
+    // `#[serde(with = "serde_bytes")]` the producer emitted a `Uint8Array`, which
+    // `JSON.stringify` mangles into `{"0":…,"1":…}`, so the consumer discarded every
+    // detail event as invalid and the R2 archive stayed empty.
+    //
+    // A true producer→consumer loop is impractical in this harness: the EVENTS
+    // producer is bound to a sink queue with no consumer (vitest.config.ts
+    // `queueProducers`), and miniflare delivers to consumers asynchronously on the
+    // batch timeout, which would leak R2 writes into unrelated tests. Instead the
+    // worker exposes a test-only route that runs the exact producer serialization
+    // (`serde_wasm_bindgen::to_value` + `JSON.stringify`, mirroring `Queue::send`);
+    // parsing its response yields precisely what the platform would hand the consumer
+    // as `message.body`.
+    const produced = await exports.default.fetch(
+      "https://copylocker.test/__test/analytics-detail-queue-body",
+    );
+    expect(produced.status).toBe(200);
+    const event = JSON.parse(await produced.text()) as AnalyticsDetailTestEvent;
+
+    // On the wire the machine key must be a plain JSON array of numbers; the
+    // serde_bytes regression turned it into `{"0":…,"1":…}` at this exact point.
+    expect(Array.isArray(event.machine_key)).toBe(true);
+
+    const result = await dispatchEvents([event], "analytics-round-trip");
+    expect(result.explicitAcks).toEqual(["analytics-round-trip-0"]);
+    expect(result.retryMessages).toEqual([]);
+
+    const key = analyticsR2Key(event);
+    const object = await env.ARCHIVE.get(key);
+    expect(object).not.toBeNull();
+    if (object === null) {
+      throw new Error("analytics detail record was not written after the queue round-trip");
+    }
+    const archived = JSON.parse(await object.text()) as AnalyticsDetailTestEvent;
+    expect(archived.machine_key).toEqual(new Array<number>(32).fill(5));
+    expect(archived.record_id).toBe(event.record_id);
+  });
+
+  it("rolls up one day of detail records idempotently with sketches and T1 counters", async () => {
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    const dayStart = Math.floor(Date.now() / 86_400_000) - 1;
+    const date = new Date(dayStart * 86_400_000).toISOString().slice(0, 10);
+    const occurredAt = dayStart * 86_400 + 3_600;
+    const records = [
+      analyticsDetailEvent({
+        record_id: "aa".repeat(16),
+        occurred_at: occurredAt,
+        telemetry: {
+          consent_version: 3,
+          window_start: 1_799_000_000,
+          session_count: 10_000,
+          session_duration_histogram: [10, 5, 2, 0],
+          feature_hits: { "feature.alpha": 7 },
+          days_active: 9,
+        },
+        clip_events: ["session_count_clipped"],
+      }),
+      analyticsDetailEvent({
+        record_id: "bb".repeat(16),
+        occurred_at: occurredAt,
+        machine_key: new Array<number>(32).fill(6),
+        telemetry_dropped: "no_consent",
+      }),
+      analyticsDetailEvent({
+        record_id: "cc".repeat(16),
+        occurred_at: occurredAt,
+        machine_key: new Array<number>(32).fill(7),
+        telemetry_dropped: "tier_gate",
+      }),
+      analyticsDetailEvent({
+        record_id: "dd".repeat(16),
+        occurred_at: occurredAt,
+        kind: "activation",
+        machine_key: new Array<number>(32).fill(8),
+        reused: false,
+      }),
+    ];
+    for (const record of records) {
+      await env.ARCHIVE.put(analyticsR2Key(record, date), JSON.stringify(record));
+    }
+
+    // The every-minute dev cron never rolls up.
+    await runScheduledCron();
+    expect(
+      (
+        await env.DB.prepare("SELECT COUNT(*) AS n FROM analytics_rollup").first<{
+          n: number;
+        }>()
+      )?.n,
+    ).toBe(0);
+
+    await runScheduledCron("15 0 * * *");
+
+    const rollupRows = (
+      await env.DB.prepare(
+        "SELECT metric_id, dims_json, value FROM analytics_rollup WHERE product_id = ? \
+         ORDER BY metric_id, dims_json",
+      )
+        .bind(productId)
+        .all<{ metric_id: string; dims_json: string; value: number }>()
+    ).results;
+    const rollupValues = new Map(
+      rollupRows.map((row) => [`${row.metric_id}|${row.dims_json}`, row.value]),
+    );
+    expect(rollupValues.get("dev.checked_in|{}")).toBe(3);
+    expect(rollupValues.get('dev.checked_in|{"app_version":"1.2.3"}')).toBe(3);
+    expect(rollupValues.get('dev.checked_in|{"country":"DE"}')).toBe(3);
+    expect(rollupValues.get('dev.checked_in|{"mode":"O"}')).toBe(3);
+    expect(rollupValues.get("act.new|{}")).toBe(1);
+    expect(rollupValues.get('act.by_path|{"activation_path":"online"}')).toBe(1);
+
+    // Every populated cube has a p=14 sketch of exactly SKETCH_BYTES bytes.
+    const hllRows = (
+      await env.DB.prepare(
+        "SELECT cube_key, sketch FROM analytics_hll WHERE product_id = ? ORDER BY cube_key",
+      )
+        .bind(productId)
+        .all<{ cube_key: string; sketch: ArrayBuffer | number[] }>()
+    ).results;
+    expect(hllRows.map((row) => row.cube_key)).toEqual([
+      "cube_0|product_1",
+      "cube_1|product_1|1.2.3",
+      "cube_2|product_1|macos|arm64",
+      "cube_3|product_1|DE",
+      "cube_4|product_1|online",
+      "cube_5|product_1|O",
+      "cube_6|product_1|rel_1",
+      "cube_7|product_1|policy_1",
+      "cube_8|product_1|0.1.0",
+    ]);
+    for (const row of hllRows) {
+      const sketchLength =
+        row.sketch instanceof ArrayBuffer ? row.sketch.byteLength : row.sketch.length;
+      expect(sketchLength).toBe(16_385);
+    }
+
+    const telemetryRows = (
+      await env.DB.prepare(
+        "SELECT metric_id, dims_json, value, sample_n FROM telemetry_rollup \
+         WHERE product_id = ? ORDER BY metric_id, dims_json",
+      )
+        .bind(productId)
+        .all<{ metric_id: string; dims_json: string; value: number; sample_n: number }>()
+    ).results;
+    const telemetryValues = new Map(
+      telemetryRows.map((row) => [
+        `${row.metric_id}|${row.dims_json}`,
+        [row.value, row.sample_n],
+      ]),
+    );
+    // The poisoned session_count arrives clipped to 10_000.
+    expect(telemetryValues.get("use.session_count|{}")).toEqual([10_000, 1]);
+    expect(telemetryValues.get("use.days_active|{}")).toEqual([9, 1]);
+    expect(telemetryValues.get('use.session_duration|{"bucket":0}')).toEqual([10, 1]);
+    expect(telemetryValues.get('use.feature_hits|{"feature_id":"feature.alpha"}')).toEqual([
+      7, 1,
+    ]);
+    // Every anomaly counter: the clip, the consent drop, and the tier-gate drop.
+    expect(telemetryValues.get("t1.clipped_session_count|{}")).toEqual([1, 3]);
+    expect(telemetryValues.get("t1.dropped_no_consent|{}")).toEqual([1, 3]);
+    expect(telemetryValues.get("t1.dropped_tier_gate|{}")).toEqual([1, 3]);
+
+    // Re-running the same day is a no-op: byte-identical rows in all three tables.
+    const first = await analyticsTableSnapshot();
+    await runScheduledCron("15 0 * * *");
+    expect(await analyticsTableSnapshot()).toEqual(first);
+  });
+
+  // ----- M6 part 3: admin analytics API, DSR, telemetry purge -----
+
+  // FNV-1a with the splitmix64 finalizer, mirroring the sketch's placement hash.
+  function analyticsHash64(data: Uint8Array): bigint {
+    let hash = 0xcbf29ce484222325n;
+    for (const byte of data) {
+      hash ^= BigInt(byte);
+      hash = (hash * 0x100000001b3n) & uint64Mask;
+    }
+    hash ^= hash >> 30n;
+    hash = (hash * 0xbf58476d1ce4e5b9n) & uint64Mask;
+    hash ^= hash >> 27n;
+    hash = (hash * 0x94d049bb133111ebn) & uint64Mask;
+    return hash ^ (hash >> 31n);
+  }
+
+  // A serialized p=14 sketch (version byte + 16384 registers) over the given keys.
+  function hllSketchBytes(machineKeys: number[][]): Uint8Array {
+    const registers = new Array<number>(16_384).fill(0);
+    for (const key of machineKeys) {
+      const h = analyticsHash64(new Uint8Array(key));
+      const index = Number(h >> 50n);
+      const w = ((h << 14n) & uint64Mask) | (1n << 13n);
+      let rank = 1;
+      for (let bit = 63; bit >= 0; bit -= 1) {
+        if (((w >> BigInt(bit)) & 1n) === 1n) break;
+        rank += 1;
+      }
+      if (rank > (registers[index] ?? 0)) registers[index] = rank;
+    }
+    return new Uint8Array([1, ...registers]);
+  }
+
+  async function hmacBytes(
+    keyBytes: number[] | Uint8Array,
+    payload: number[] | Uint8Array,
+  ): Promise<Uint8Array> {
+    const keyMaterial = new Uint8Array(keyBytes);
+    const data = new Uint8Array(payload);
+    const key = await crypto.subtle.importKey(
+      "raw",
+      keyMaterial,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    return new Uint8Array(await crypto.subtle.sign("HMAC", key, data));
+  }
+
+  // HMAC(HMAC(TEST_SERVER_PEPPER, "copylocker/analytics-pepper"), machine_id), matching
+  // the worker's analytics machine-key derivation (TEST_SERVER_PEPPER is 32 bytes of 9).
+  async function analyticsMachineKey(machineId: number[]): Promise<number[]> {
+    const pepper = await hmacBytes(
+      new Uint8Array(32).fill(9),
+      textEncoder.encode("copylocker/analytics-pepper"),
+    );
+    return [...(await hmacBytes(pepper, new Uint8Array(machineId)))];
+  }
+
+  function machineKeyBytes(value: number): number[] {
+    return new Array<number>(32).fill(value);
+  }
+
+  async function seedAnalyticsHll(
+    date: string,
+    cubeKey: string,
+    machineKeys: number[][],
+  ): Promise<void> {
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO analytics_hll(product_id, date, cube_key, sketch) \
+       VALUES (?, ?, ?, ?)",
+    )
+      .bind(productId, date, cubeKey, hllSketchBytes(machineKeys))
+      .run();
+  }
+
+  async function seedAnalyticsRollup(
+    date: string,
+    metricId: string,
+    dimsJson: string,
+    value: number,
+  ): Promise<void> {
+    await env.DB.prepare(
+      "INSERT OR REPLACE INTO analytics_rollup(product_id, date, metric_id, dims_json, value) \
+       VALUES (?, ?, ?, ?, ?)",
+    )
+      .bind(productId, date, metricId, dimsJson, value)
+      .run();
+  }
+
+  it("serves the 36-entry metric catalog to analytics:r tokens only", async () => {
+    const token = testAdminToken(140);
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    await seedAdminToken(token, ["analytics:r"]);
+    const wrongScope = testAdminToken(141);
+    await seedAdminToken(wrongScope, ["licenses:rw"]);
+
+    const unauthenticated = await exports.default.fetch(
+      "https://copylocker.test/v1/admin/analytics/definitions",
+    );
+    expect(unauthenticated.status).toBe(401);
+    const denied = await adminJson("/analytics/definitions", "GET", wrongScope);
+    expect(denied.status).toBe(403);
+
+    const response = await adminJson("/analytics/definitions", "GET", token);
+    expect(response.status).toBe(200);
+    const body = await response.json<{
+      ok: boolean;
+      items: { id: string; name: string; definition: string; tier: string; trusted: boolean }[];
+    }>();
+    expect(body.ok).toBe(true);
+    expect(body.items).toHaveLength(36);
+    const checkedIn = body.items.find((item) => item.id === "dev.checked_in");
+    expect(checkedIn).toMatchObject({ tier: "T0", trusted: true });
+    const sessionCount = body.items.find((item) => item.id === "use.session_count");
+    expect(sessionCount).toMatchObject({ tier: "T1", trusted: false });
+    for (const item of body.items) {
+      expect(item.name.length).toBeGreaterThan(0);
+      expect(item.definition.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("merges HLL sketches, labels the source, and suppresses sub-k buckets", async () => {
+    const token = testAdminToken(142);
+    await seedProjectedLicense(licenseBytes(950));
+    await seedAdminToken(token, ["analytics:r"]);
+    const dates = ["2026-08-03", "2026-08-04"];
+    const bigSet = [1, 2, 3, 4, 5, 6].map(machineKeyBytes);
+    const smallSet = [7, 8].map(machineKeyBytes);
+    for (const date of dates) {
+      await seedAnalyticsHll(date, "cube_0|product_1", bigSet);
+      await seedAnalyticsHll(date, "cube_1|product_1|1.2.3", smallSet);
+      await seedAnalyticsRollup(date, "act.new", "{}", 2);
+    }
+
+    const ungrouped = await adminJson(
+      `/analytics/metrics?${new URLSearchParams({
+        product: productId,
+        ids: "dev.checked_in,act.new",
+        from: "2026-08-03",
+        to: "2026-08-04",
+        granularity: "day",
+        source: "hll",
+      })}`,
+      "GET",
+      token,
+    );
+    expect(ungrouped.status).toBe(200);
+    const body = await ungrouped.json<{
+      meta: { source: string; error_pct: number; suppressed_buckets: number };
+      series: { metric_id: string; points: { bucket: string; dims: unknown; value: number }[] }[];
+    }>();
+    expect(body.meta).toMatchObject({ source: "hll", error_pct: 0.81, suppressed_buckets: 0 });
+    const checkedIn = body.series.find((series) => series.metric_id === "dev.checked_in");
+    expect(checkedIn?.points.map((point) => [point.bucket, point.value])).toEqual([
+      ["2026-08-03", 6],
+      ["2026-08-04", 6],
+    ]);
+    const activations = body.series.find((series) => series.metric_id === "act.new");
+    expect(activations?.points.map((point) => [point.bucket, point.value])).toEqual([
+      ["2026-08-03", 2],
+      ["2026-08-04", 2],
+    ]);
+
+    // A grouped bucket with 2 distinct machines never leaves the server: both daily
+    // buckets merge into one week bucket, which is suppressed and accounted in meta.
+    const grouped = await adminJson(
+      `/analytics/metrics?${new URLSearchParams({
+        product: productId,
+        ids: "dev.checked_in",
+        from: "2026-08-03",
+        to: "2026-08-04",
+        granularity: "week",
+        group_by: "app_version",
+        source: "hll",
+      })}`,
+      "GET",
+      token,
+    );
+    expect(grouped.status).toBe(200);
+    const groupedBody = await grouped.json<{
+      meta: { suppressed_buckets: number };
+      series: { metric_id: string; points: unknown[] }[];
+    }>();
+    const groupedSeries = groupedBody.series.find(
+      (series) => series.metric_id === "dev.checked_in",
+    );
+    expect(groupedSeries?.points).toEqual([]);
+    expect(groupedBody.meta.suppressed_buckets).toBe(1);
+  });
+
+  it("computes exact distinct counts from bounded raw detail on the auto path", async () => {
+    const token = testAdminToken(143);
+    await seedProjectedLicense(licenseBytes(951));
+    await seedAdminToken(token, ["analytics:r"]);
+    const dayOne = Date.parse("2026-08-03T00:00:00Z") / 1000;
+    const dayTwo = Date.parse("2026-08-04T00:00:00Z") / 1000;
+    const records: AnalyticsDetailTestEvent[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      records.push(
+        analyticsDetailEvent({
+          record_id: `aa${String(index).padStart(2, "0")}${"0".repeat(28)}`,
+          occurred_at: dayOne + index,
+          machine_key: machineKeyBytes(index + 1),
+        }),
+      );
+    }
+    // Day two: the same six machines (one duplicate record), still six distinct.
+    for (let index = 0; index < 6; index += 1) {
+      records.push(
+        analyticsDetailEvent({
+          record_id: `bb${String(index).padStart(2, "0")}${"0".repeat(28)}`,
+          occurred_at: dayTwo + index,
+          machine_key: machineKeyBytes(index + 1),
+        }),
+      );
+    }
+    records.push(
+      analyticsDetailEvent({
+        record_id: `bb09${"0".repeat(28)}`,
+        occurred_at: dayTwo + 9,
+        machine_key: machineKeyBytes(1),
+      }),
+    );
+    for (const record of records) {
+      await env.ARCHIVE.put(analyticsR2Key(record), JSON.stringify(record));
+    }
+
+    const response = await adminJson(
+      `/analytics/metrics?${new URLSearchParams({
+        product: productId,
+        ids: "dev.checked_in",
+        from: "2026-08-03",
+        to: "2026-08-04",
+        granularity: "day",
+      })}`,
+      "GET",
+      token,
+    );
+    expect(response.status).toBe(200);
+    const body = await response.json<{
+      meta: { source: string; error_pct: number; suppressed_buckets: number };
+      series: { metric_id: string; points: { bucket: string; value: number }[] }[];
+    }>();
+    expect(body.meta).toMatchObject({ source: "exact", error_pct: 0, suppressed_buckets: 0 });
+    const series = body.series.find((entry) => entry.metric_id === "dev.checked_in");
+    expect(series?.points.map((point) => [point.bucket, point.value])).toEqual([
+      ["2026-08-03", 6],
+      ["2026-08-04", 6],
+    ]);
+  });
+
+  it("warns at day granularity when the effective refresh interval is a week", async () => {
+    const token = testAdminToken(144);
+    await seedProjectedLicense(licenseBytes(952));
+    await seedAdminToken(token, ["analytics:r"]);
+    await env.DB.prepare(
+      "UPDATE policies SET refresh_after_sec = ? WHERE id = ? AND product_id = ?",
+    )
+      .bind(7 * 86_400, "policy_1", productId)
+      .run();
+
+    const query = (granularity: string) =>
+      adminJson(
+        `/analytics/metrics?${new URLSearchParams({
+          product: productId,
+          ids: "dev.checked_in",
+          from: "2026-08-03",
+          to: "2026-08-04",
+          granularity,
+          source: "hll",
+        })}`,
+        "GET",
+        token,
+      );
+    const day = await query("day");
+    expect(day.status).toBe(200);
+    const dayBody = await day.json<{ meta: { warning?: string } }>();
+    expect(dayBody.meta.warning).toContain("refresh interval is 7 days");
+
+    const week = await query("week");
+    expect(week.status).toBe(200);
+    const weekBody = await week.json<{ meta: { warning?: string } }>();
+    expect(weekBody.meta.warning).toBeUndefined();
+  });
+
+  it("exports metrics as bounded CSV and NDJSON", async () => {
+    const token = testAdminToken(145);
+    await seedProjectedLicense(licenseBytes(953));
+    await seedAdminToken(token, ["analytics:r"]);
+    await seedAnalyticsRollup("2026-08-03", "act.new", "{}", 2);
+    await seedAnalyticsRollup("2026-08-04", "act.new", "{}", 3);
+    await seedAnalyticsRollup("2026-08-03", "act.by_path", '{"activation_path":"online"}', 2);
+
+    const base = {
+      product: productId,
+      ids: "act.new,act.by_path",
+      from: "2026-08-03",
+      to: "2026-08-04",
+    };
+    const csv = await adminJson(
+      `/analytics/export?${new URLSearchParams({ ...base, format: "csv" })}`,
+      "GET",
+      token,
+    );
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get("content-type")).toContain("text/csv");
+    const csvText = await csv.text();
+    const csvLines = csvText.trimEnd().split("\n");
+    expect(csvLines[0]).toBe("metric_id,bucket,dims_json,value");
+    expect(csvLines).toContain("act.new,2026-08-03,{},2");
+    expect(csvLines).toContain("act.new,2026-08-04,{},3");
+    expect(csvLines).toContain('act.by_path,2026-08-03,"{""activation_path"":""online""}",2');
+
+    const ndjson = await adminJson(
+      `/analytics/export?${new URLSearchParams({ ...base, format: "ndjson" })}`,
+      "GET",
+      token,
+    );
+    expect(ndjson.status).toBe(200);
+    expect(ndjson.headers.get("content-type")).toContain("application/x-ndjson");
+    const ndjsonText = await ndjson.text();
+    const rows = ndjsonText
+      .trimEnd()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { metric_id: string; value: number; dims: unknown });
+    expect(rows).toHaveLength(3);
+    expect(rows).toContainEqual({
+      metric_id: "act.by_path",
+      bucket: "2026-08-03",
+      dims: { activation_path: "online" },
+      value: 2,
+    });
+  });
+
+  it("creates analytics subscriptions idempotently and lists them", async () => {
+    const token = testAdminToken(146);
+    await seedProjectedLicense(licenseBytes(954));
+    await seedAdminToken(token, ["analytics:r"]);
+    const config = {
+      product_id: productId,
+      metric_ids: ["dev.checked_in"],
+      window_days: 28,
+      granularity: "week",
+      webhook_url: "https://reports.example.test/hook",
+    };
+
+    const insecure = await adminJson(
+      "/analytics/subscriptions",
+      "POST",
+      token,
+      { ...config, webhook_url: "http://insecure.example.test/hook" },
+      "sub-insecure-1",
+    );
+    expect(insecure.status).toBe(400);
+
+    const first = await adminJson("/analytics/subscriptions", "POST", token, config, "sub-key-1");
+    expect(first.status).toBe(201);
+    const created = await first.json<{
+      ok: boolean;
+      subscription: { id: string; delivery: string; product_id: string };
+    }>();
+    expect(created.ok).toBe(true);
+    expect(created.subscription.id).toMatch(/^sub_[0-9a-f]{32}$/);
+    expect(created.subscription.delivery).toBe("pending");
+
+    const replay = await adminJson("/analytics/subscriptions", "POST", token, config, "sub-key-1");
+    expect(replay.status).toBe(201);
+    const replayed = await replay.json<{ subscription: { id: string } }>();
+    expect(replayed.subscription.id).toBe(created.subscription.id);
+
+    const list = await adminJson("/analytics/subscriptions", "GET", token);
+    expect(list.status).toBe(200);
+    const listed = await list.json<{ ok: boolean; items: { id: string }[] }>();
+    expect(listed.items.map((item) => item.id)).toEqual([created.subscription.id]);
+  });
+
+  it("exports held data for a machine without crossing tenants", async () => {
+    const token = testAdminToken(147);
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    await seedAdminToken(token, ["dsr:rw"]);
+    const licenseId = licenseBytes(955);
+    const machineId = machineBytes(955);
+    await seedProjectedLicense(licenseId);
+    await seedProjectedMachine(licenseId, machineId);
+    await env.DB.prepare(
+      "INSERT INTO audit_index(seq, ts, actor, action, target, prev_hash, hash, r2_key) \
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+      .bind(
+        9_000_001,
+        1_700_000_000,
+        "issuer:0",
+        "issue:machine-cred",
+        hexId(machineId),
+        new Uint8Array(32),
+        new Uint8Array(32).fill(1),
+        "audit/2023/11/14/0/1.cbor",
+      )
+      .run();
+
+    const response = await adminJson("/dsr/export", "POST", token, {
+      product_id: productId,
+      machine_id: hexId(machineId),
+    });
+    expect(response.status).toBe(200);
+    const body = await response.json<{
+      ok: boolean;
+      subject: { machine_id: string };
+      machines: { id: string; fingerprint: string; status: string }[];
+      licenses: { id: string; product_id: string }[];
+      audit_references: { target: string }[];
+      audit_truncated: boolean;
+    }>();
+    expect(body.ok).toBe(true);
+    expect(body.subject.machine_id).toBe(hexId(machineId));
+    expect(body.machines).toHaveLength(1);
+    expect(body.machines[0]?.id).toBe(hexId(machineId));
+    expect(body.machines[0]?.fingerprint).toHaveLength(64);
+    expect(body.licenses[0]?.id).toBe(hexId(licenseId));
+    expect(body.audit_references.map((row) => row.target)).toEqual([hexId(machineId)]);
+    expect(body.audit_truncated).toBe(false);
+
+    const otherVendor = testAdminToken(148);
+    await seedAdminToken(otherVendor, ["dsr:rw"], "vendor_2", "other-admin@example.test");
+    const denied = await adminJson("/dsr/export", "POST", otherVendor, {
+      product_id: productId,
+      machine_id: hexId(machineId),
+    });
+    expect(denied.status).toBe(404);
+  });
+
+  it("deletes machine data end-to-end without touching the rollup tables", async () => {
+    const token = testAdminToken(149);
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    await seedAdminToken(token, ["dsr:rw"]);
+    const { licenseId, stub } = licenseObject(956);
+    await seedProjectedLicense(licenseId);
+    await initLicense(stub, licenseId, 3);
+    const keys = await generateDeviceKeys();
+    const reserved = await postJson(stub, "/reserve", {
+      ...reserveBody(956, "dsr-reserve", keys.verifyingKey),
+      fingerprint: new Array<number>(32).fill(5),
+      build_fp: "build-dsr",
+    });
+    expect(reserved.status).toBe(201);
+    const reservation = await reserved.json<ReserveResult>();
+    expect((await postJson(stub, "/commit", { machine_id: reservation.machine_id })).status).toBe(
+      200,
+    );
+    await seedProjectedMachine(licenseId, reservation.machine_id);
+
+    const occurredAt = Math.floor(Date.now() / 1000) - 86_400;
+    // The delete scan window follows the machine row's observed lifetime.
+    await env.DB.prepare("UPDATE machines SET first_seen_at = ?, last_seen_at = ? WHERE id = ?")
+      .bind(occurredAt, occurredAt, new Uint8Array(reservation.machine_id))
+      .run();
+    const rawRecord = analyticsDetailEvent({
+      record_id: `dd01${"0".repeat(28)}`,
+      occurred_at: occurredAt,
+      machine_key: await analyticsMachineKey(reservation.machine_id),
+    });
+    await env.ARCHIVE.put(analyticsR2Key(rawRecord), JSON.stringify(rawRecord));
+    await seedAnalyticsRollup("2026-08-05", "act.new", "{}", 1);
+    const tablesBeforeDelete = await analyticsTableSnapshot();
+
+    const selector = { product_id: productId, machine_id: hexId(reservation.machine_id) };
+    const dryRun = await adminJson("/dsr/delete", "POST", token, selector);
+    expect(dryRun.status).toBe(200);
+    const dryRunBody = await dryRun.json<{
+      dry_run: boolean;
+      machines: unknown[];
+      raw_records: number;
+      audit_tombstone: boolean;
+    }>();
+    expect(dryRunBody.dry_run).toBe(true);
+    expect(dryRunBody.machines).toHaveLength(1);
+    expect(dryRunBody.raw_records).toBe(1);
+    expect(dryRunBody.audit_tombstone).toBe(false);
+    // The dry run deleted nothing.
+    expect(
+      (
+        await env.DB.prepare("SELECT COUNT(*) AS n FROM machines WHERE id = ?")
+          .bind(new Uint8Array(reservation.machine_id))
+          .first<{ n: number }>()
+      )?.n,
+    ).toBe(1);
+
+    const confirmed = await adminJson(
+      "/dsr/delete?dry_run=false",
+      "POST",
+      token,
+      selector,
+      "dsr-delete-1",
+    );
+    expect(confirmed.status).toBe(200);
+    const confirmedBody = await confirmed.json<{
+      dry_run: boolean;
+      deleted_machines: number;
+      deleted_raw_records: number;
+      audit_tombstone: boolean;
+      audit_note: string;
+    }>();
+    expect(confirmedBody.dry_run).toBe(false);
+    expect(confirmedBody.deleted_machines).toBe(1);
+    expect(confirmedBody.deleted_raw_records).toBe(1);
+    expect(confirmedBody.audit_tombstone).toBe(false);
+    expect(confirmedBody.audit_note).toContain("audit chain");
+
+    // D1 projection row and R2 raw detail are gone.
+    expect(
+      (
+        await env.DB.prepare("SELECT COUNT(*) AS n FROM machines WHERE id = ?")
+          .bind(new Uint8Array(reservation.machine_id))
+          .first<{ n: number }>()
+      )?.n,
+    ).toBe(0);
+    expect(await env.ARCHIVE.get(analyticsR2Key(rawRecord))).toBeNull();
+    // The DO activation is erased.
+    await runInDurableObject(stub, async (_instance, state) => {
+      const rows = state.storage.sql
+        .exec(
+          "SELECT COUNT(*) AS n FROM activations WHERE machine_id = ?",
+          new Uint8Array(reservation.machine_id),
+        )
+        .toArray() as { n: number | bigint }[];
+      expect(Number(rows[0]?.n ?? 99)).toBe(0);
+    });
+    // The rollup tables are never retroactively modified (design §11).
+    expect(await analyticsTableSnapshot()).toEqual(tablesBeforeDelete);
+
+    // Same Idempotency-Key replays the journaled result.
+    const replay = await adminJson(
+      "/dsr/delete?dry_run=false",
+      "POST",
+      token,
+      selector,
+      "dsr-delete-1",
+    );
+    expect(replay.status).toBe(200);
+    const replayBody = await replay.json<{ deleted_machines: number }>();
+    expect(replayBody.deleted_machines).toBe(1);
+  });
+
+  it("purges telemetry raw detail and, on an explicit before, old rollup rows", async () => {
+    const token = testAdminToken(150);
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    await seedAdminToken(token, ["dsr:rw"]);
+    await seedProjectedLicense(licenseBytes(957));
+    const oldSeconds = Date.parse("2026-07-01T00:00:00Z") / 1000;
+    const newSeconds = Date.parse("2026-08-01T00:00:00Z") / 1000;
+    const telemetryBlock = {
+      consent_version: 3,
+      window_start: 1_800_000_000,
+      session_count: 4,
+      session_duration_histogram: [1, 2, 1, 0],
+      feature_hits: { "feature.alpha": 2 },
+      days_active: 5,
+    };
+    const oldTelemetry = analyticsDetailEvent({
+      record_id: `ee01${"0".repeat(28)}`,
+      occurred_at: oldSeconds,
+      telemetry: telemetryBlock,
+    });
+    const oldCheckInOnly = analyticsDetailEvent({
+      record_id: `ee02${"0".repeat(28)}`,
+      occurred_at: oldSeconds + 60,
+    });
+    const newTelemetry = analyticsDetailEvent({
+      record_id: `ee03${"0".repeat(28)}`,
+      occurred_at: newSeconds,
+      telemetry: telemetryBlock,
+    });
+    for (const record of [oldTelemetry, oldCheckInOnly, newTelemetry]) {
+      await env.ARCHIVE.put(analyticsR2Key(record), JSON.stringify(record));
+    }
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO telemetry_rollup(product_id, date, metric_id, dims_json, value, sample_n) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+      ).bind(productId, "2026-07-10", "use.session_count", "{}", 5, 1),
+      env.DB.prepare(
+        "INSERT INTO telemetry_rollup(product_id, date, metric_id, dims_json, value, sample_n) \
+         VALUES (?, ?, ?, ?, ?, ?)",
+      ).bind(productId, "2026-08-01", "use.session_count", "{}", 6, 1),
+    ]);
+    await seedAnalyticsRollup("2026-07-10", "act.new", "{}", 1);
+
+    const dryRun = await adminJson("/telemetry/purge", "POST", token, {
+      product_id: productId,
+      before: "2026-07-15",
+    });
+    expect(dryRun.status).toBe(200);
+    const dryRunBody = await dryRun.json<{
+      dry_run: boolean;
+      cutoff: string;
+      raw_records: number;
+      rollup_rows: number;
+    }>();
+    expect(dryRunBody).toMatchObject({
+      dry_run: true,
+      cutoff: "2026-07-15",
+      raw_records: 1,
+      rollup_rows: 1,
+    });
+
+    const confirmed = await adminJson(
+      "/telemetry/purge?dry_run=false",
+      "POST",
+      token,
+      { product_id: productId, before: "2026-07-15" },
+      "telemetry-purge-1",
+    );
+    expect(confirmed.status).toBe(200);
+    const confirmedBody = await confirmed.json<{
+      dry_run: boolean;
+      deleted_raw_records: number;
+      deleted_rollup_rows: number;
+      journaled: boolean;
+    }>();
+    expect(confirmedBody).toMatchObject({
+      dry_run: false,
+      deleted_raw_records: 1,
+      deleted_rollup_rows: 1,
+      journaled: true,
+    });
+
+    // A same-key replay after completion finds nothing left to delete; it must return
+    // the journaled result, not a fresh zero-count "journaled: false" response.
+    const replayed = await adminJson(
+      "/telemetry/purge?dry_run=false",
+      "POST",
+      token,
+      { product_id: productId, before: "2026-07-15" },
+      "telemetry-purge-1",
+    );
+    expect(replayed.status).toBe(200);
+    const replayedBody = await replayed.json<{
+      dry_run: boolean;
+      deleted_raw_records: number;
+      deleted_rollup_rows: number;
+      journaled: boolean;
+    }>();
+    expect(replayedBody).toMatchObject({
+      dry_run: false,
+      deleted_raw_records: 1,
+      deleted_rollup_rows: 1,
+      journaled: true,
+    });
+
+    // The telemetry-carrying old record is gone; the check-in-only old record and the
+    // newer telemetry record stay within their own retention classes.
+    expect(await env.ARCHIVE.get(analyticsR2Key(oldTelemetry))).toBeNull();
+    expect(await env.ARCHIVE.get(analyticsR2Key(oldCheckInOnly))).not.toBeNull();
+    expect(await env.ARCHIVE.get(analyticsR2Key(newTelemetry))).not.toBeNull();
+    const rollupDates = (
+      await env.DB.prepare(
+        "SELECT date FROM telemetry_rollup WHERE product_id = ? ORDER BY date",
+      )
+        .bind(productId)
+        .all<{ date: string }>()
+    ).results.map((row) => row.date);
+    // The pre-cutoff row is gone; post-cutoff rows (including other tests' rows) stay.
+    expect(rollupDates).not.toContain("2026-07-10");
+    expect(rollupDates).toContain("2026-08-01");
+    // T0 rollups are untouched.
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT COUNT(*) AS n FROM analytics_rollup WHERE product_id = ? AND date = ?",
+        )
+          .bind(productId, "2026-07-10")
+          .first<{ n: number }>()
+      )?.n,
+    ).toBe(1);
+  });
+
+  // ----- M7-C: cross-license machines, GDPR machine delete, admin audit query/verify -----
+
+  it("lists machines across licenses with filters, pagination, and scope checks", async () => {
+    const m7cProduct = "product_m7c";
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO vendors(id, name, fpr_salt_ref, created_at) VALUES (?, ?, ?, ?)",
+      ).bind("vendor_m7c", "M7-C Vendor", "m7c_salt", 1),
+      env.DB.prepare(
+        "INSERT INTO products(\
+           id, vendor_id, name, min_suite_id, min_proto_ver, min_sdk_version, created_at\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).bind(
+        m7cProduct,
+        "vendor_m7c",
+        "M7-C Product",
+        new Uint8Array(suiteId),
+        1,
+        "0.1.0",
+        1,
+      ),
+      env.DB.prepare(
+        "INSERT INTO policies(\
+           id, product_id, name, entitlement_json, validity_json, version_scope_json, \
+           seats, mode, refresh_after_sec, grace_seconds, created_at, updated_at\
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ).bind(
+        "policy_m7c",
+        m7cProduct,
+        "M7-C Policy",
+        '{"tier":"pro"}',
+        '{"kind":"perpetual"}',
+        '{"kind":"unlimited"}',
+        3,
+        0,
+        3600,
+        3600,
+        1,
+        1,
+      ),
+    ]);
+    const licenseA = licenseBytes(3_101);
+    const licenseB = licenseBytes(3_102);
+    for (const licenseId of [licenseA, licenseB]) {
+      await env.DB.prepare(
+        "INSERT INTO licenses(\
+           id, product_id, policy_id, key_hmac, status, seats_override, catalog_version, \
+           created_at, updated_at\
+         ) VALUES (?, ?, 'policy_m7c', ?, 'active', 3, 1, 1, 1)",
+      )
+        .bind(new Uint8Array(licenseId), m7cProduct, new Uint8Array(licenseId))
+        .run();
+    }
+    const machineA1 = machineBytes(3_101);
+    const machineA2 = machineBytes(3_102);
+    const machineB1 = machineBytes(3_103);
+    await seedProjectedMachine(licenseA, machineA1);
+    await seedProjectedMachine(licenseA, machineA2, "revoked");
+    await seedProjectedMachine(licenseB, machineB1, "pending");
+
+    const token = testAdminToken(161);
+    await seedAdminToken(token, ["machines:r"], "vendor_m7c", "m7c-admin@example.test");
+
+    const page1 = await adminJson(`/machines?product_id=${m7cProduct}&limit=2`, "GET", token);
+    expect(page1.status, await page1.clone().text()).toBe(200);
+    const page1Body = await page1.json<{
+      ok: boolean;
+      product_id: string;
+      items: { machine_id: string; license_id: string; status: string }[];
+      next_cursor: string | null;
+    }>();
+    expect(page1Body.ok).toBe(true);
+    expect(page1Body.product_id).toBe(m7cProduct);
+    expect(page1Body.items).toHaveLength(2);
+    expect(page1Body.next_cursor).toBeTypeOf("string");
+    // Keyset order: (first_seen_at, id) ascending; the fixtures share first_seen_at = 1.
+    const ordered = [machineA1, machineA2, machineB1].map(hexId).sort();
+    expect(page1Body.items.map((item) => item.machine_id)).toEqual(ordered.slice(0, 2));
+
+    const page2 = await adminJson(
+      `/machines?product_id=${m7cProduct}&limit=2&cursor=${page1Body.next_cursor}`,
+      "GET",
+      token,
+    );
+    expect(page2.status).toBe(200);
+    const page2Body = await page2.json<{
+      items: { machine_id: string }[];
+      next_cursor: string | null;
+    }>();
+    expect(page2Body.items.map((item) => item.machine_id)).toEqual(ordered.slice(2));
+    expect(page2Body.next_cursor).toBeNull();
+
+    const filteredStatus = await adminJson(
+      `/machines?product_id=${m7cProduct}&status=revoked`,
+      "GET",
+      token,
+    );
+    expect(filteredStatus.status).toBe(200);
+    const statusBody = await filteredStatus.json<{ items: { machine_id: string }[] }>();
+    expect(statusBody.items.map((item) => item.machine_id)).toEqual([hexId(machineA2)]);
+
+    const filteredLicense = await adminJson(
+      `/machines?product_id=${m7cProduct}&license_id=${hexId(licenseB)}`,
+      "GET",
+      token,
+    );
+    expect(filteredLicense.status).toBe(200);
+    const licenseBody = await filteredLicense.json<{
+      items: { machine_id: string; license_id: string; status: string }[];
+    }>();
+    expect(
+      licenseBody.items.map((item) => ({
+        machine_id: item.machine_id,
+        license_id: item.license_id,
+        status: item.status,
+      })),
+    ).toEqual([
+      {
+        machine_id: hexId(machineB1),
+        license_id: hexId(licenseB),
+        status: "pending",
+      },
+    ]);
+
+    // A machines:rw token satisfies the read scope (bootstrap tokens predate the split).
+    const rwToken = testAdminToken(162);
+    await seedAdminToken(rwToken, ["machines:rw"], "vendor_m7c", "m7c-admin@example.test");
+    expect((await adminJson(`/machines?product_id=${m7cProduct}`, "GET", rwToken)).status).toBe(
+      200,
+    );
+
+    const readOnly = testAdminToken(163);
+    await seedAdminToken(readOnly, ["licenses:rw"], "vendor_m7c", "m7c-admin@example.test");
+    expect((await adminJson(`/machines?product_id=${m7cProduct}`, "GET", readOnly)).status).toBe(
+      403,
+    );
+    expect((await adminJson(`/machines?product_id=${m7cProduct}`, "GET", "")).status).toBe(401);
+    for (const bad of [
+      `/machines?product_id=${m7cProduct}&limit=0`,
+      `/machines?product_id=${m7cProduct}&limit=101`,
+      `/machines?product_id=${m7cProduct}&cursor=not-a-cursor`,
+      `/machines?product_id=${m7cProduct}&license_id=zz`,
+      "/machines?status=active",
+    ]) {
+      expect((await adminJson(bad, "GET", token)).status).toBe(400);
+    }
+
+    const otherVendor = testAdminToken(164);
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO vendors(id, name, fpr_salt_ref, created_at) VALUES (?, ?, ?, ?)",
+    )
+      .bind("vendor_2", "Other Vendor", "other_salt", 1)
+      .run();
+    await seedAdminToken(otherVendor, ["machines:r"], "vendor_2", "other-admin@example.test");
+    expect((await adminJson(`/machines?product_id=${m7cProduct}`, "GET", otherVendor)).status).toBe(
+      404,
+    );
+  });
+
+  it("queries admin audit events with filters and keyset pagination", async () => {
+    const licenseA = licenseObject(3_201);
+    const licenseB = licenseObject(3_202);
+    const licenseC = licenseObject(3_203);
+    await seedProjectedLicense(licenseA.licenseId);
+    await seedProjectedLicense(licenseB.licenseId);
+    await seedProjectedLicense(licenseC.licenseId);
+    // The machine revocation requires a real LicenseDO activation.
+    await initLicense(licenseC.stub, licenseC.licenseId, 3);
+    const keys = await generateDeviceKeys();
+    const reserved = await postJson(licenseC.stub, "/reserve", {
+      ...reserveBody(3_203, "audit-list-reserve", keys.verifyingKey),
+      fingerprint: new Array<number>(32).fill(5),
+      build_fp: "build-audit-list",
+    });
+    expect(reserved.status).toBe(201);
+    const reservation = await reserved.json<ReserveResult>();
+    expect(
+      (await postJson(licenseC.stub, "/commit", { machine_id: reservation.machine_id })).status,
+    ).toBe(200);
+    await seedProjectedMachine(licenseC.licenseId, reservation.machine_id);
+    const machineC = reservation.machine_id;
+    // A clean chain: this test asserts exact sequence numbers.
+    await clearAdminRevocationState(licenseA.licenseId);
+    const token = testAdminToken(167);
+    await seedAdminToken(token, ["revoke", "audit:r"]);
+
+    for (const [collection, target, key] of [
+      ["licenses", licenseA.licenseId, "audit-list-1"],
+      ["licenses", licenseB.licenseId, "audit-list-2"],
+      ["machines", machineC, "audit-list-3"],
+    ] as const) {
+      const response = await postAdminRevoke(collection, target, token, false, key);
+      expect(response.status, await response.clone().text()).toBe(200);
+    }
+
+    const byTarget = await adminJson(`/audit?target=${hexId(machineC)}`, "GET", token);
+    expect(byTarget.status, await byTarget.clone().text()).toBe(200);
+    const targetBody = await byTarget.json<{
+      items: {
+        seq: number;
+        action: string;
+        target: string;
+        actor: string;
+        source_kind: string;
+        reason: number | null;
+        request_id: string;
+        r2_key: string;
+      }[];
+      next_cursor: string | null;
+    }>();
+    expect(targetBody.items).toHaveLength(1);
+    expect(targetBody.items[0]).toMatchObject({
+      seq: 3,
+      action: "revoke:machine",
+      target: hexId(machineC),
+      actor: "admin@example.test",
+      source_kind: "revocation",
+      reason: 2,
+      request_id: "audit-list-3",
+    });
+    expect(targetBody.items[0]?.r2_key).toContain("audit-admin/");
+    expect(targetBody.next_cursor).toBeNull();
+
+    const byKind = await adminJson("/audit?kind=revocation", "GET", token);
+    expect(byKind.status).toBe(200);
+    const kindBody = await byKind.json<{ items: { seq: number }[] }>();
+    expect(kindBody.items.map((item) => item.seq)).toEqual([3, 2, 1]);
+
+    const page1 = await adminJson("/audit?limit=2", "GET", token);
+    expect(page1.status, await page1.clone().text()).toBe(200);
+    const page1Body = await page1.json<{
+      items: { seq: number }[];
+      next_cursor: string | null;
+    }>();
+    expect(page1Body.items.map((item) => item.seq)).toEqual([3, 2]);
+    expect(page1Body.next_cursor).toBe("2");
+
+    const page2 = await adminJson("/audit?limit=2&cursor=2", "GET", token);
+    expect(page2.status).toBe(200);
+    const page2Body = await page2.json<{
+      items: { seq: number }[];
+      next_cursor: string | null;
+    }>();
+    expect(page2Body.items.map((item) => item.seq)).toEqual([1]);
+    expect(page2Body.next_cursor).toBeNull();
+
+    const noAudit = testAdminToken(168);
+    await seedAdminToken(noAudit, ["revoke"]);
+    expect((await adminJson("/audit", "GET", noAudit)).status).toBe(403);
+    expect((await adminJson("/audit", "GET", "")).status).toBe(401);
+    for (const bad of ["/audit?limit=0", "/audit?limit=101", "/audit?cursor=-1"]) {
+      expect((await adminJson(bad, "GET", token)).status).toBe(400);
+    }
+  });
+
+  it("verifies the admin audit hash chain and pinpoints the first broken link", async () => {
+    const firstLicense = licenseObject(3_301);
+    const secondLicense = licenseObject(3_302);
+    await seedProjectedLicense(firstLicense.licenseId);
+    await seedProjectedLicense(secondLicense.licenseId);
+    // The machine revocation requires a real LicenseDO activation.
+    await initLicense(secondLicense.stub, secondLicense.licenseId, 3);
+    const keys = await generateDeviceKeys();
+    const reserved = await postJson(secondLicense.stub, "/reserve", {
+      ...reserveBody(3_302, "chain-reserve", keys.verifyingKey),
+      fingerprint: new Array<number>(32).fill(5),
+      build_fp: "build-chain",
+    });
+    expect(reserved.status).toBe(201);
+    const reservation = await reserved.json<ReserveResult>();
+    expect(
+      (await postJson(secondLicense.stub, "/commit", { machine_id: reservation.machine_id }))
+        .status,
+    ).toBe(200);
+    await seedProjectedMachine(secondLicense.licenseId, reservation.machine_id);
+    await clearAdminRevocationState(firstLicense.licenseId);
+    await clearAdminRevocationState(secondLicense.licenseId);
+    const token = testAdminToken(165);
+    await seedAdminToken(token, ["revoke", "audit:r"]);
+
+    const first = await postAdminRevoke(
+      "licenses",
+      firstLicense.licenseId,
+      token,
+      false,
+      "chain-revoke-1",
+    );
+    expect(first.status, await first.clone().text()).toBe(200);
+    const second = await postAdminRevoke(
+      "machines",
+      reservation.machine_id,
+      token,
+      false,
+      "chain-revoke-2",
+    );
+    expect(second.status, await second.clone().text()).toBe(200);
+
+    const verify = () => adminJson("/audit/verify", "POST", token);
+    const intact = await verify();
+    expect(intact.status, await intact.clone().text()).toBe(200);
+    const intactBody = await intact.json<{
+      ok: boolean;
+      verified: boolean;
+      event_count: number;
+      first_seq: number | null;
+      last_seq: number | null;
+      head: { seq: number; hash: string } | null;
+      first_broken: { seq: number; reason: string } | null;
+    }>();
+    expect(intactBody).toMatchObject({
+      ok: true,
+      verified: true,
+      event_count: 2,
+      first_seq: 1,
+      last_seq: 2,
+      first_broken: null,
+    });
+    const storedHead = await env.DB.prepare(
+      "SELECT lower(hex(hash)) AS hash FROM admin_audit_events WHERE seq = 2",
+    ).first<{ hash: string }>();
+    expect(intactBody.head).toEqual({ seq: 2, hash: storedHead?.hash });
+
+    // A broken prev_hash link is reported with its sequence. The stored column and the
+    // canonical event JSON are corrupted consistently, so the failure is the link, not a
+    // column mismatch.
+    const originalRow2 = await env.DB.prepare(
+      "SELECT event_json, prev_hash FROM admin_audit_events WHERE seq = 2",
+    ).first<{ event_json: string; prev_hash: ArrayBuffer }>();
+    const mutated = JSON.parse(originalRow2?.event_json ?? "{}") as { prev_hash: number[] };
+    mutated.prev_hash = new Array<number>(32).fill(9);
+    await env.DB.prepare("UPDATE admin_audit_events SET event_json = ?, prev_hash = ? WHERE seq = 2")
+      .bind(JSON.stringify(mutated), new Uint8Array(32).fill(9))
+      .run();
+    const brokenLink = await (await verify()).json<{
+      verified: boolean;
+      first_broken: { seq: number; reason: string } | null;
+    }>();
+    expect(brokenLink.verified).toBe(false);
+    expect(brokenLink.first_broken).toEqual({ seq: 2, reason: "prev_hash_link" });
+
+    // Restore the link, then tamper with the payload: the recomputed hash no longer
+    // matches the stored hash.
+    await env.DB.prepare("UPDATE admin_audit_events SET event_json = ?, prev_hash = ? WHERE seq = 2")
+      .bind(
+        originalRow2?.event_json ?? "{}",
+        new Uint8Array(originalRow2?.prev_hash ?? new ArrayBuffer(0)),
+      )
+      .run();
+    await env.DB.prepare(
+      "UPDATE admin_audit_events \
+       SET event_json = json_replace(event_json, '$.actor', 'mallory@example.test') \
+       WHERE seq = 1",
+    ).run();
+    const tampered = await (await verify()).json<{
+      verified: boolean;
+      event_count: number;
+      first_broken: { seq: number; reason: string } | null;
+    }>();
+    expect(tampered.verified).toBe(false);
+    expect(tampered.event_count).toBe(1);
+    expect(tampered.first_broken).toEqual({ seq: 1, reason: "hash_mismatch" });
+
+    const noAudit = testAdminToken(166);
+    await seedAdminToken(noAudit, ["revoke"]);
+    expect((await adminJson("/audit/verify", "POST", noAudit)).status).toBe(403);
+    expect((await adminJson("/audit/verify", "POST", "")).status).toBe(401);
+  });
+
+  it("runs the GDPR machine delete alias end-to-end with dry-run and idempotent replay", async () => {
+    const token = testAdminToken(169);
+    await applyD1Migrations(env.DB, env.TEST_MIGRATIONS);
+    await env.DB.prepare(
+      "INSERT OR IGNORE INTO vendors(id, name, fpr_salt_ref, created_at) VALUES (?, ?, ?, ?)",
+    )
+      .bind("vendor_1", "Vendor", "salt_ref", 1)
+      .run();
+    await seedAdminToken(token, ["machines:rw"]);
+    const { licenseId, stub } = licenseObject(3_401);
+    await seedProjectedLicense(licenseId);
+    await initLicense(stub, licenseId, 3);
+    const keys = await generateDeviceKeys();
+    const reserved = await postJson(stub, "/reserve", {
+      ...reserveBody(3_401, "gdpr-alias-reserve", keys.verifyingKey),
+      fingerprint: new Array<number>(32).fill(5),
+      build_fp: "build-gdpr",
+    });
+    expect(reserved.status).toBe(201);
+    const reservation = await reserved.json<ReserveResult>();
+    expect((await postJson(stub, "/commit", { machine_id: reservation.machine_id })).status).toBe(
+      200,
+    );
+    await seedProjectedMachine(licenseId, reservation.machine_id);
+
+    const occurredAt = Math.floor(Date.now() / 1000) - 86_400;
+    await env.DB.prepare("UPDATE machines SET first_seen_at = ?, last_seen_at = ? WHERE id = ?")
+      .bind(occurredAt, occurredAt, new Uint8Array(reservation.machine_id))
+      .run();
+    const rawRecord = analyticsDetailEvent({
+      record_id: `dd02${"0".repeat(28)}`,
+      occurred_at: occurredAt,
+      machine_key: await analyticsMachineKey(reservation.machine_id),
+    });
+    await env.ARCHIVE.put(analyticsR2Key(rawRecord), JSON.stringify(rawRecord));
+
+    const machineHex = hexId(reservation.machine_id);
+    const deleteMachine = (query: string, bearer: string, idempotencyKey?: string) =>
+      adminJson(`/machines/${machineHex}${query}`, "DELETE", bearer, undefined, idempotencyKey);
+    const countMachines = async () =>
+      (
+        await env.DB.prepare("SELECT COUNT(*) AS n FROM machines WHERE id = ?")
+          .bind(new Uint8Array(reservation.machine_id))
+          .first<{ n: number }>()
+      )?.n;
+
+    // Dry-run is the default: impact preview, zero writes.
+    const dryRun = await deleteMachine("", token);
+    expect(dryRun.status, await dryRun.clone().text()).toBe(200);
+    const dryRunBody = await dryRun.json<{
+      dry_run: boolean;
+      machines: unknown[];
+      raw_records: number;
+      audit_tombstone: boolean;
+    }>();
+    expect(dryRunBody).toMatchObject({ dry_run: true, raw_records: 1, audit_tombstone: false });
+    expect(dryRunBody.machines).toHaveLength(1);
+    expect(await countMachines()).toBe(1);
+    expect(await env.ARCHIVE.get(analyticsR2Key(rawRecord))).not.toBeNull();
+
+    // A confirmed delete requires the Idempotency-Key.
+    expect((await deleteMachine("?dry_run=false", token)).status).toBe(400);
+
+    // The dsr scope alone does not authorize the machine alias, and neither does the
+    // read-only machine scope.
+    const dsrOnly = testAdminToken(170);
+    await seedAdminToken(dsrOnly, ["dsr:rw"]);
+    expect((await deleteMachine("", dsrOnly)).status).toBe(403);
+    const readOnly = testAdminToken(171);
+    await seedAdminToken(readOnly, ["machines:r"]);
+    expect((await deleteMachine("", readOnly)).status).toBe(403);
+
+    const missing = await adminJson(
+      `/machines/${hexId(machineBytes(4_095))}`,
+      "DELETE",
+      token,
+    );
+    expect(missing.status).toBe(404);
+
+    const confirmed = await deleteMachine("?dry_run=false", token, "gdpr-delete-1");
+    expect(confirmed.status, await confirmed.clone().text()).toBe(200);
+    const confirmedBody = await confirmed.json<{
+      dry_run: boolean;
+      deleted_machines: number;
+      deleted_raw_records: number;
+      audit_tombstone: boolean;
+      audit_note: string;
+    }>();
+    expect(confirmedBody).toMatchObject({
+      dry_run: false,
+      deleted_machines: 1,
+      deleted_raw_records: 1,
+      audit_tombstone: false,
+    });
+    expect(confirmedBody.audit_note).toContain("audit chain");
+
+    // The D1 projection, the R2 raw detail, and the DO activation are all gone.
+    expect(await countMachines()).toBe(0);
+    expect(await env.ARCHIVE.get(analyticsR2Key(rawRecord))).toBeNull();
+    await runInDurableObject(stub, async (_instance, state) => {
+      const rows = state.storage.sql
+        .exec(
+          "SELECT COUNT(*) AS n FROM activations WHERE machine_id = ?",
+          new Uint8Array(reservation.machine_id),
+        )
+        .toArray() as { n: number | bigint }[];
+      expect(Number(rows[0]?.n ?? 99)).toBe(0);
+    });
+
+    // The journal records the machine-scope alias, not the dsr scope.
+    const journal = await env.DB.prepare(
+      "SELECT action, required_scope FROM admin_operations WHERE request_id = ?",
+    )
+      .bind("gdpr-delete-1")
+      .first<{ action: string; required_scope: string }>();
+    expect(journal).toMatchObject({ action: "dsr:delete", required_scope: "machines:rw" });
+
+    // The same Idempotency-Key replays the journaled result even though the machine row
+    // is already gone.
+    const replay = await deleteMachine("?dry_run=false", token, "gdpr-delete-1");
+    expect(replay.status, await replay.clone().text()).toBe(200);
+    const replayBody = await replay.json<{ deleted_machines: number }>();
+    expect(replayBody.deleted_machines).toBe(1);
+
+    // The same key for a different machine conflicts.
+    const conflict = await adminJson(
+      `/machines/${hexId(machineBytes(4_094))}?dry_run=false`,
+      "DELETE",
+      token,
+      undefined,
+      "gdpr-delete-1",
+    );
+    expect(conflict.status).toBe(409);
+  });
 });

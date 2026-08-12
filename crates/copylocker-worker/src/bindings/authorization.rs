@@ -10,7 +10,6 @@ use copylocker_server_core::version::{
 };
 use copylocker_suite::cbor::{decode_canonical, CborValue, Limits, MapBuilder};
 use copylocker_suite::{AeadScheme, CryptoRng, CryptoSuite, Secret};
-use copylocker_suite_std::ClStd1;
 use copylocker_types::{
     Digest, Entitlements, EpochId, Fingerprint, KillReason, LicenseId, Mode, SuiteId, Verdict,
     VersionScope,
@@ -21,6 +20,8 @@ use sha2::Sha256;
 use worker::wasm_bindgen::JsValue;
 use worker::{D1Database, D1Type, Env, Error, Result};
 use zeroize::Zeroize;
+
+use crate::suites::{suite_dispatch, RequestSuite};
 
 const SERVER_PEPPER_BINDING: &str = "SERVER_PEPPER";
 const VARIANT_PARAMS_KEY_BINDING: &str = "VARIANT_PARAMS_KEY";
@@ -97,6 +98,9 @@ pub(crate) struct ReleaseMaterial {
     pub(crate) module_digest: Digest,
     pub(crate) binder_extra: Vec<Vec<u8>>,
     pub(crate) asset_keks: Vec<RegisteredAssetKek>,
+    /// The release's registered suite, resolved from the persisted release row. At-rest
+    /// protection for this release's material dispatches on it.
+    pub(crate) suite: RequestSuite,
     state_key: Secret<[u8; SECRET_LEN]>,
 }
 
@@ -109,11 +113,15 @@ impl ReleaseMaterial {
         rng: &mut dyn CryptoRng,
     ) -> Result<Vec<u8>> {
         let aad = credential_state_aad(license_id, fingerprint);
-        <ClStd1 as CryptoSuite>::Aead::seal_with_nonce(
-            self.state_key.expose(),
-            &aad,
-            credential_secret.as_slice(),
-            rng,
+        suite_dispatch!(
+            self.suite,
+            S,
+            <S as CryptoSuite>::Aead::seal_with_nonce(
+                self.state_key.expose(),
+                &aad,
+                credential_secret.as_slice(),
+                rng,
+            )
         )
         .map_err(|_| Error::RustError("credential state encryption failed".to_owned()))
     }
@@ -125,10 +133,10 @@ impl ReleaseMaterial {
         encrypted: &[u8],
     ) -> Result<Secret<[u8; SECRET_LEN]>> {
         let aad = credential_state_aad(license_id, fingerprint);
-        let mut plaintext = <ClStd1 as CryptoSuite>::Aead::open_with_nonce(
-            self.state_key.expose(),
-            &aad,
-            encrypted,
+        let mut plaintext = suite_dispatch!(
+            self.suite,
+            S,
+            <S as CryptoSuite>::Aead::open_with_nonce(self.state_key.expose(), &aad, encrypted)
         )
         .map_err(|_| Error::RustError("credential state decryption failed".to_owned()))?;
         let value = plaintext.as_slice().try_into().map_err(|_| {
@@ -229,6 +237,38 @@ pub(crate) async fn load_by_license_key(
         .await?
         .ok_or(AuthorizationError::InvalidCredential)?;
     load_context(env, &database, license, release_id, purpose, now).await
+}
+
+/// Load the license bound to a Mode E account. When several licenses name the same account,
+/// the most recently created one wins; the caller still enforces `status = active`.
+pub(crate) async fn load_by_account(
+    env: &Env,
+    account_id: &str,
+    release_id: &str,
+    purpose: LoadPurpose,
+    now: i64,
+) -> std::result::Result<AuthorizationContext, AuthorizationError> {
+    let database = env.d1("DB")?;
+    let license = database
+        .prepare(
+            "SELECT id, product_id, policy_id, status, seats_override, \
+                    entitlement_override_json, version_scope_override_json, expires_at, \
+                    catalog_version \
+             FROM licenses WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT 1",
+        )
+        .bind(&[text(account_id)])?
+        .first::<LicenseRow>(None)
+        .await?
+        .ok_or(AuthorizationError::InvalidCredential)?;
+    load_context(env, &database, license, release_id, purpose, now).await
+}
+
+/// The raw server pepper, exposed for the analytics pseudonymous machine key
+/// (`90-analytics-telemetry.md §4.2`). Callers must domain-separate any derived key.
+pub(crate) async fn server_pepper(
+    env: &Env,
+) -> std::result::Result<Secret<[u8; SECRET_LEN]>, AuthorizationError> {
+    load_secret_key(env, SERVER_PEPPER_BINDING, TEST_SERVER_PEPPER_BINDING).await
 }
 
 pub(crate) async fn license_key_hmac(
@@ -622,15 +662,17 @@ async fn load_release_material(
     .await?;
     let variant_id = release.variant_id_u64()?;
     let suite_id = release.suite_id()?;
-    let variant_aad = variant_at_rest_aad(release, variant_id, suite_id);
-    let mut plaintext = <ClStd1 as CryptoSuite>::Aead::open_with_nonce(
-        variant_key.expose(),
-        &variant_aad,
+    let suite = RequestSuite::resolve_persisted(suite_id)
+        .ok_or_else(|| server_error("release suite is unsupported"))?;
+    let parsed = open_variant_params_with(
+        &variant_key,
+        &release.id,
+        &release.product_id,
+        variant_id,
+        &release.build_fingerprint,
+        suite_id,
         &release.variant_params,
-    )
-    .map_err(|_| server_error("release variant parameters could not be decrypted"))?;
-    let parsed = parse_variant_params(&plaintext)?;
-    plaintext.zeroize();
+    )?;
     if parsed.variant_id != variant_id {
         return Err(server_error("release variant parameter id mismatch"));
     }
@@ -652,26 +694,18 @@ async fn load_release_material(
         }
         let key_version = u64::try_from(row.key_version)
             .map_err(|_| server_error("asset KEK version is invalid"))?;
-        let aad = asset_kek_at_rest_aad(
+        let key = open_asset_kek_with(
+            &asset_key,
             &release.id,
             &release.product_id,
             &row.feature_id,
             key_version,
-        );
-        let mut plaintext = <ClStd1 as CryptoSuite>::Aead::open_with_nonce(
-            asset_key.expose(),
-            &aad,
+            suite_id,
             &row.encrypted_kek,
-        )
-        .map_err(|_| server_error("registered asset KEK could not be decrypted"))?;
-        let key = plaintext
-            .as_slice()
-            .try_into()
-            .map_err(|_| server_error("registered asset KEK has an invalid length"))?;
-        plaintext.zeroize();
+        )?;
         asset_keks.push(RegisteredAssetKek {
             feature_id: row.feature_id,
-            key: Secret::new(key),
+            key,
         });
     }
 
@@ -683,15 +717,196 @@ async fn load_release_material(
         module_digest: Digest(parsed.module_digest),
         binder_extra: parsed.binder_extra,
         asset_keks,
+        suite,
         state_key: variant_key,
     })
 }
 
-struct VariantParams {
+pub(crate) struct VariantParams {
+    pub(crate) variant_id: u64,
+    pub(crate) variant_const: [u8; 32],
+    pub(crate) module_digest: [u8; 32],
+    pub(crate) binder_extra: Vec<Vec<u8>>,
+}
+
+impl VariantParams {
+    /// Canonical CBOR plaintext (`ADR-0013` `variant_params_v1`). CL-STD-1 omits
+    /// the suite-private slot 5.
+    fn encode(&self) -> Vec<u8> {
+        let mut builder = MapBuilder::new();
+        builder.put(0, CborValue::Uint(VARIANT_PARAMS_SCHEMA_VERSION));
+        builder.put(1, CborValue::Uint(self.variant_id));
+        builder.put(2, CborValue::Bytes(self.variant_const.to_vec()));
+        builder.put(3, CborValue::Bytes(self.module_digest.to_vec()));
+        builder.put(
+            4,
+            CborValue::Array(
+                self.binder_extra
+                    .iter()
+                    .map(|item| CborValue::Bytes(item.clone()))
+                    .collect(),
+            ),
+        );
+        builder.finish()
+    }
+}
+
+/// Encrypt freshly derived variant parameters for D1 storage (the write half of
+/// `load_release_material`; plaintext never touches D1). The suite selects the AEAD through
+/// the supported-suite registry and is bound into the at-rest AAD.
+pub(crate) async fn seal_variant_params_at_rest(
+    env: &Env,
+    release_id: &str,
+    product_id: &str,
+    build_fingerprint: &str,
+    suite_id: SuiteId,
+    params: &VariantParams,
+    rng: &mut dyn CryptoRng,
+) -> std::result::Result<Vec<u8>, AuthorizationError> {
+    let variant_key = load_secret_key(
+        env,
+        VARIANT_PARAMS_KEY_BINDING,
+        TEST_VARIANT_PARAMS_KEY_BINDING,
+    )
+    .await?;
+    let suite = RequestSuite::resolve_persisted(suite_id)
+        .ok_or_else(|| server_error("release suite is unsupported"))?;
+    let aad = variant_at_rest_aad(
+        release_id,
+        product_id,
+        params.variant_id,
+        build_fingerprint,
+        suite_id,
+    );
+    suite_dispatch!(
+        suite,
+        S,
+        <S as CryptoSuite>::Aead::seal_with_nonce(
+            variant_key.expose(),
+            &aad,
+            &params.encode(),
+            rng
+        )
+    )
+    .map_err(|_| server_error("variant parameters at-rest encryption failed"))
+}
+
+/// Decrypt one release's variant parameters (used to reuse a stable variant on
+/// a later release of the same product).
+pub(crate) async fn open_variant_params_at_rest(
+    env: &Env,
+    release_id: &str,
+    product_id: &str,
     variant_id: u64,
-    variant_const: [u8; 32],
-    module_digest: [u8; 32],
-    binder_extra: Vec<Vec<u8>>,
+    build_fingerprint: &str,
+    suite_id: SuiteId,
+    encrypted: &[u8],
+) -> std::result::Result<VariantParams, AuthorizationError> {
+    let variant_key = load_secret_key(
+        env,
+        VARIANT_PARAMS_KEY_BINDING,
+        TEST_VARIANT_PARAMS_KEY_BINDING,
+    )
+    .await?;
+    open_variant_params_with(
+        &variant_key,
+        release_id,
+        product_id,
+        variant_id,
+        build_fingerprint,
+        suite_id,
+        encrypted,
+    )
+}
+
+fn open_variant_params_with(
+    variant_key: &Secret<[u8; SECRET_LEN]>,
+    release_id: &str,
+    product_id: &str,
+    variant_id: u64,
+    build_fingerprint: &str,
+    suite_id: SuiteId,
+    encrypted: &[u8],
+) -> std::result::Result<VariantParams, AuthorizationError> {
+    let suite = RequestSuite::resolve_persisted(suite_id)
+        .ok_or_else(|| server_error("release suite is unsupported"))?;
+    let aad = variant_at_rest_aad(
+        release_id,
+        product_id,
+        variant_id,
+        build_fingerprint,
+        suite_id,
+    );
+    let mut plaintext = suite_dispatch!(
+        suite,
+        S,
+        <S as CryptoSuite>::Aead::open_with_nonce(variant_key.expose(), &aad, encrypted)
+    )
+    .map_err(|_| server_error("release variant parameters could not be decrypted"))?;
+    let parsed = parse_variant_params(&plaintext);
+    plaintext.zeroize();
+    parsed
+}
+
+/// Load the full signing material of one release, for preloading offline KEKs
+/// of sibling releases (`preload_n`).
+pub(crate) async fn load_release_material_by_id(
+    env: &Env,
+    database: &D1Database,
+    release_id: &str,
+    product_id: &str,
+) -> std::result::Result<Option<ReleaseMaterial>, AuthorizationError> {
+    let row = database
+        .prepare(
+            "SELECT id, product_id, app_version, variant_id, variant_params, build_fingerprint, \
+                    channel, status, compromised_action, min_sdk_version, proto_ver, suite_id, \
+                    published_at \
+             FROM releases WHERE id = ? AND product_id = ?",
+        )
+        .bind(&[text(release_id), text(product_id)])?
+        .first::<ReleaseRow>(None)
+        .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    row.validate()?;
+    load_release_material(env, database, &row).await.map(Some)
+}
+
+/// The newest registered sibling releases eligible for offline-KEK preloading,
+/// newest first. Compromised and deprecated releases are excluded: a build that
+/// is on its way out must not receive freshly wrapped keys.
+pub(crate) async fn preload_release_ids(
+    database: &D1Database,
+    product_id: &str,
+    current_release_id: &str,
+    limit: u32,
+) -> std::result::Result<Vec<String>, AuthorizationError> {
+    let limit = i64::from(limit.clamp(1, 16));
+    let rows = database
+        .prepare(
+            "SELECT id FROM releases \
+             WHERE product_id = ? AND status = 'active' AND id != ? \
+             ORDER BY published_at DESC, id DESC LIMIT ?",
+        )
+        .bind(&[text(product_id), text(current_release_id), number(limit)?])?
+        .all()
+        .await?
+        .results::<ReleaseIdRow>()?;
+    Ok(rows.into_iter().map(|row| row.id).collect())
+}
+
+/// The global monotonic security baseline (`security_floor_log`).
+pub(crate) async fn current_security_floor(
+    env: &Env,
+) -> std::result::Result<u64, AuthorizationError> {
+    let row = env
+        .d1("DB")?
+        .prepare("SELECT COALESCE(MAX(floor), 0) AS value FROM security_floor_log")
+        .first::<FloorRow>(None)
+        .await?
+        .ok_or_else(|| server_error("security floor query returned no row"))?;
+    u64::try_from(row.value).map_err(|_| server_error("security floor is invalid"))
 }
 
 fn parse_variant_params(bytes: &[u8]) -> std::result::Result<VariantParams, AuthorizationError> {
@@ -745,16 +960,22 @@ fn fixed_bytes<const N: usize>(
         .ok_or_else(|| server_error(&format!("release {name} has an invalid length")))
 }
 
-fn variant_at_rest_aad(release: &ReleaseRow, variant_id: u64, suite_id: SuiteId) -> Vec<u8> {
+fn variant_at_rest_aad(
+    release_id: &str,
+    product_id: &str,
+    variant_id: u64,
+    build_fingerprint: &str,
+    suite_id: SuiteId,
+) -> Vec<u8> {
     let mut builder = MapBuilder::new();
     builder.put(
         0,
         CborValue::Text("copylocker/variant-at-rest/v1".to_owned()),
     );
-    builder.put(1, CborValue::Text(release.id.clone()));
-    builder.put(2, CborValue::Text(release.product_id.clone()));
+    builder.put(1, CborValue::Text(release_id.to_owned()));
+    builder.put(2, CborValue::Text(product_id.to_owned()));
     builder.put(3, CborValue::Uint(variant_id));
-    builder.put(4, CborValue::Text(release.build_fingerprint.clone()));
+    builder.put(4, CborValue::Text(build_fingerprint.to_owned()));
     builder.put(5, CborValue::Bytes(suite_id.as_bytes().to_vec()));
     builder.finish()
 }
@@ -775,6 +996,83 @@ fn asset_kek_at_rest_aad(
     builder.put(3, CborValue::Text(feature_id.to_owned()));
     builder.put(4, CborValue::Uint(key_version));
     builder.finish()
+}
+
+/// Encrypt a registered asset KEK for D1 storage.
+///
+/// This is the write half of the at-rest protection in `load_release_material`:
+/// the KEK only ever exists in plaintext inside a request handler, never in D1.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn seal_asset_kek_at_rest(
+    env: &Env,
+    release_id: &str,
+    product_id: &str,
+    feature_id: &str,
+    key_version: u64,
+    suite_id: SuiteId,
+    kek: &Secret<[u8; SECRET_LEN]>,
+    rng: &mut dyn CryptoRng,
+) -> std::result::Result<Vec<u8>, AuthorizationError> {
+    let asset_key = load_secret_key(env, ASSET_KEK_KEY_BINDING, TEST_ASSET_KEK_KEY_BINDING).await?;
+    let suite = RequestSuite::resolve_persisted(suite_id)
+        .ok_or_else(|| server_error("release suite is unsupported"))?;
+    let aad = asset_kek_at_rest_aad(release_id, product_id, feature_id, key_version);
+    suite_dispatch!(
+        suite,
+        S,
+        <S as CryptoSuite>::Aead::seal_with_nonce(asset_key.expose(), &aad, kek.as_slice(), rng)
+    )
+    .map_err(|_| server_error("asset KEK at-rest encryption failed"))
+}
+
+/// Decrypt a stored asset KEK row, enforcing the 32-byte plaintext contract.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn open_asset_kek_at_rest(
+    env: &Env,
+    release_id: &str,
+    product_id: &str,
+    feature_id: &str,
+    key_version: u64,
+    suite_id: SuiteId,
+    encrypted: &[u8],
+) -> std::result::Result<Secret<[u8; SECRET_LEN]>, AuthorizationError> {
+    let asset_key = load_secret_key(env, ASSET_KEK_KEY_BINDING, TEST_ASSET_KEK_KEY_BINDING).await?;
+    open_asset_kek_with(
+        &asset_key,
+        release_id,
+        product_id,
+        feature_id,
+        key_version,
+        suite_id,
+        encrypted,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn open_asset_kek_with(
+    asset_key: &Secret<[u8; SECRET_LEN]>,
+    release_id: &str,
+    product_id: &str,
+    feature_id: &str,
+    key_version: u64,
+    suite_id: SuiteId,
+    encrypted: &[u8],
+) -> std::result::Result<Secret<[u8; SECRET_LEN]>, AuthorizationError> {
+    let suite = RequestSuite::resolve_persisted(suite_id)
+        .ok_or_else(|| server_error("release suite is unsupported"))?;
+    let aad = asset_kek_at_rest_aad(release_id, product_id, feature_id, key_version);
+    let mut plaintext = suite_dispatch!(
+        suite,
+        S,
+        <S as CryptoSuite>::Aead::open_with_nonce(asset_key.expose(), &aad, encrypted)
+    )
+    .map_err(|_| server_error("registered asset KEK could not be decrypted"))?;
+    let key = plaintext
+        .as_slice()
+        .try_into()
+        .map_err(|_| server_error("registered asset KEK has an invalid length"))?;
+    plaintext.zeroize();
+    Ok(Secret::new(key))
 }
 
 fn credential_state_aad(license_id: LicenseId, fingerprint: &Fingerprint) -> Vec<u8> {
@@ -1028,7 +1326,7 @@ impl ReleaseRow {
             || self.channel.is_empty()
             || self.min_sdk_version.is_empty()
             || self.proto_ver != i64::from(copylocker_types::PROTO_VER)
-            || self.suite_id()? != copylocker_suite_std::CL_STD_1_SUITE_ID
+            || RequestSuite::resolve_persisted(self.suite_id()?).is_none()
             || self.variant_params.is_empty()
             || !(-MAX_SAFE_INTEGER..=MAX_SAFE_INTEGER).contains(&self.published_at)
         {
@@ -1092,6 +1390,16 @@ struct AssetKekRow {
     key_version: i64,
     #[serde(with = "serde_bytes")]
     encrypted_kek: Vec<u8>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleaseIdRow {
+    id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct FloorRow {
+    value: i64,
 }
 
 #[derive(Debug, Deserialize)]

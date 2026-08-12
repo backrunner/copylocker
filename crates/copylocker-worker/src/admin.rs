@@ -32,11 +32,14 @@ const ADMIN_SCOPES: &[&str] = &[
     "policies:rw",
     "licenses:rw",
     "machines:rw",
+    "machines:r",
+    "accounts:rw",
     "revoke",
     "releases:rw",
     "epochs:rw",
     "audit:r",
     "analytics:r",
+    "dsr:rw",
     "sign:manifest",
 ];
 
@@ -777,7 +780,18 @@ pub(crate) async fn authenticate_scope(
     env: &Env,
     required_scope: &str,
 ) -> Result<AuthResult> {
-    if !ADMIN_SCOPES.contains(&required_scope) {
+    authenticate_any_scope(request, env, &[required_scope]).await
+}
+
+/// Authenticate the Admin bearer token and require at least one of `accepted`
+/// scopes (a read scope is satisfied by its read-write counterpart when both
+/// are listed). Every accepted scope must be declared in [`ADMIN_SCOPES`].
+pub(crate) async fn authenticate_any_scope(
+    request: &Request,
+    env: &Env,
+    accepted: &[&str],
+) -> Result<AuthResult> {
+    if accepted.is_empty() || accepted.iter().any(|scope| !ADMIN_SCOPES.contains(scope)) {
         return Err(worker::Error::RustError(
             "Admin route requested an unknown scope".into(),
         ));
@@ -833,7 +847,10 @@ pub(crate) async fn authenticate_scope(
             "admin token row contains an unknown scope".into(),
         ));
     }
-    if !scopes.iter().any(|scope| scope == required_scope) {
+    if !scopes
+        .iter()
+        .any(|scope| accepted.contains(&scope.as_str()))
+    {
         return Ok(AuthResult::Forbidden);
     }
     Ok(AuthResult::Authenticated(AdminPrincipal {
@@ -1072,7 +1089,7 @@ pub(crate) fn valid_identifier(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
-fn is_test_environment(env: &Env) -> bool {
+pub(crate) fn is_test_environment(env: &Env) -> bool {
     env.var("ENVIRONMENT")
         .ok()
         .is_some_and(|value| value.to_string() == "test")

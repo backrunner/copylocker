@@ -93,5 +93,26 @@ fn cbor_headers(cache_control: &str) -> Result<Headers> {
     headers.set("Cache-Control", cache_control)?;
     headers.set("X-CL-Proto", "1")?;
     headers.set("X-Content-Type-Options", "nosniff")?;
+    // The unauthenticated client protocol endpoints must be reachable from
+    // browser apps on any origin (the web SDK talks to a license server on
+    // its own origin). No credentials or cookies are involved, so `*` is
+    // safe here; `/v1/admin/*` responses deliberately carry no CORS headers.
+    headers.set("Access-Control-Allow-Origin", "*")?;
     Ok(headers)
+}
+
+/// CORS preflight answer for the client protocol endpoints. Browser POSTs
+/// with `Content-Type: application/cbor` are not "simple requests" and always
+/// preflight; without this handler every browser activation fails.
+pub(crate) fn cors_preflight() -> Result<Response> {
+    let headers = Headers::new();
+    headers.set("Access-Control-Allow-Origin", "*")?;
+    headers.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")?;
+    headers.set(
+        "Access-Control-Allow-Headers",
+        "Accept, Content-Type, X-CL-Proto, Idempotency-Key",
+    )?;
+    headers.set("Access-Control-Max-Age", "86400")?;
+    headers.set("Cache-Control", "no-store")?;
+    Ok(Response::empty()?.with_status(204).with_headers(headers))
 }
