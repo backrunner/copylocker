@@ -9,6 +9,10 @@ release/
 # Local fuzz state; durable corpus storage is managed separately.
 /fuzz/artifacts/
 /fuzz/corpus/
+/fuzz/crash-*
+/fuzz/oom-*
+/fuzz/timeout-*
+/fuzz/leak-*
 
 # JavaScript and Cloudflare local state
 node_modules/

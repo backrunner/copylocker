@@ -15,8 +15,8 @@ repository.
 2. Read only the `.agents/` documents relevant to the affected behavior.
 3. Treat executable migrations and tested implementation as authority when roadmap text is stale.
 4. Inspect the worktree before editing. Preserve user-owned and unrelated changes.
-5. In the Orchiliao environment, read `/Users/orchiliao/.codex/RTK.md`, use the fixed toolchain
-   `PATH`, and prefix every shell command with `rtk`.
+5. In environments that provide the `rtk` shell proxy, read its documentation and prefix every
+   shell command with `rtk`.
 6. Use `rg` or `rg --files` for discovery and `apply_patch` for manual edits.
 
 ## Select the Repository

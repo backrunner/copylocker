@@ -1,6 +1,7 @@
 {
   "name": "copylocker-docs",
   "private": true,
+  "license": "GPL-3.0-only",
   "type": "module",
   "version": "0.0.0",
   "description": "CopyLocker documentation site (VitePress)",
