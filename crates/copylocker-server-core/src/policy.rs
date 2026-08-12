@@ -21,6 +21,11 @@ use crate::entitlement::EntitlementSpec;
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub enum Validity {
     /// Never expires.
     Perpetual,
@@ -55,6 +60,11 @@ pub enum Validity {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub enum TrialScope {
     /// One trial per device fingerprint, matched with tolerance so swapping a network card does
     /// not reset it.
@@ -69,6 +79,11 @@ pub enum TrialScope {
 /// (`licensing-model.md §5`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct PerpetualFallback {
     /// Consecutive paid months required.
     pub after_months: u32,
@@ -80,6 +95,11 @@ pub struct PerpetualFallback {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub enum FallbackScopeAt {
     /// The instant the fallback was earned. The JetBrains-style model.
     EarnedAt,
@@ -90,6 +110,11 @@ pub enum FallbackScopeAt {
 /// Axis four: seats and transfers.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct SeatSpec {
     /// Concurrent activations allowed.
     pub seats: u32,
@@ -118,6 +143,11 @@ impl Default for SeatSpec {
 /// Runtime tuning that ends up in every credential.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct RuntimeSpec {
     /// How long a credential is good for before an online check is due.
     pub refresh_after_secs: i64,
@@ -148,6 +178,11 @@ pub struct RuntimeSpec {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub enum VtSignature {
     /// Ed25519, certified by the PQ-signed epoch certificate. The default
     /// (`protocol-spec.md §5`).
@@ -161,6 +196,11 @@ pub enum VtSignature {
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub enum OfflineUpgradePolicy {
     /// Require an online check before the new build works.
     #[default]
@@ -191,6 +231,11 @@ impl Default for RuntimeSpec {
 /// A complete policy: one point in the five-axis space.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct Policy {
     /// Policy identifier.
     pub id: String,
