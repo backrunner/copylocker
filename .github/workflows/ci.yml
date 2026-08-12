@@ -178,6 +178,12 @@ jobs:
       - name: Test @copylocker/admin-sdk
         run: npm ci --ignore-scripts && npm run check && npm run check:bindings && npm test
         working-directory: packages/admin-sdk
+      - name: Build @copylocker/guard dist (unplugin tests consume it)
+        run: npm run build
+        working-directory: packages/guard
+      - name: Build @copylocker/seal dist (unplugin tests consume it)
+        run: npm run build
+        working-directory: packages/seal
       - name: Test @copylocker/unplugin
         run: npm ci --ignore-scripts && npm rebuild esbuild && npm run check && npm test
         working-directory: packages/unplugin
