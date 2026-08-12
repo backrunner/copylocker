@@ -609,6 +609,32 @@ vue 8/8 each, examples build green (electron 5/5, tauri cargo check 333 crates).
    transform ships `map: null` (needs `magic-string` to fix properly). The seal/web CBOR
    encoder builds per-byte `number[]` near the 64 MiB cap (perf, not correctness).
 
+## Publication and Docs Platform State (2026-08-13)
+
+- The public repository `github.com/backrunner/copylocker` is pushed through the M3-M8
+  milestone work, the post-M8 adversarial review fixes, and the open-source readiness
+  fixes. The first public CI runs exposed and fixed: the fuzz RSS-ratchet (segmented
+  scheduled runs), missing guard/seal dist builds before unplugin tests, js-yaml
+  CVE-2026-59870 (node binding lockfile), nanoid GHSA-2v37-7h3g-55p8 (four audited
+  lockfiles), and a shared-runner vitest timeout in the 100-way concurrent activation
+  test (now 30 s). CI, Native SDK CI (3 platforms), and the Fuzz workflow (dispatch
+  validation) are green on GitHub-hosted runners.
+- Open-source readiness fixes shipped: README brought to the current state, every
+  publishable manifest's repository URL corrected to `github.com/backrunner/copylocker`,
+  the workspace homepage points at the GitHub repo (copylocker.dev was unresolving),
+  local machine paths removed from tracked files, and the console ACCESS_ENFORCE/JWKS
+  limitation documented in English in `docs/guide/deployment.md` (console section).
+- The docs site moved from VitePress to svedocs 0.1.0 (exact-pinned, npm) with a custom
+  CopyLocker theme and landing page. Build: `npm run build` in `docs/` (edge mode,
+  `.svelte-kit/cloudflare`); deploy: `npm run deploy` (Cloudflare Pages project
+  `copylocker-docs`). The production target is `https://copylocker.pwp.sh`; attaching
+  the custom domain and creating the Pages project are Cloudflare dashboard actions,
+  as is setting the `CL_DOCS_DEPLOY` variable + `CLOUDFLARE_API_TOKEN` /
+  `CLOUDFLARE_ACCOUNT_ID` secrets that un-gate the docs workflow's deploy job.
+  GitHub Pages stays disabled.
+- Commits up to the wasm commit are GPG-signed; later commits are unsigned per the
+  owner's authorization (non-interactive gpg-agent).
+
 ## Non-Negotiable Engineering Contracts
 
 - Keep cryptographic security independent of proprietary implementation secrecy.
