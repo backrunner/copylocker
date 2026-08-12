@@ -2198,6 +2198,10 @@ fn build_validate_request<S: CryptoSuite>(
         proof: Vec::new(),
         integrity_summary: None,
         known_security_floor,
+        // Telemetry is web-only for now: no desktop T1 collector/config surface exists in
+        // this crate yet (`90-analytics-telemetry.md §10` sketches one). The proto field and
+        // the server consume path are client-agnostic; the web SDK embeds its block through
+        // the `build-validate-request` op before signing.
         telemetry: None,
     };
     request.proof = FastSig::sign(

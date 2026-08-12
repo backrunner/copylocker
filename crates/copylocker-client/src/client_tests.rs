@@ -168,15 +168,21 @@ impl FakeServer {
     }
 
     fn sealed_asset(&self, plaintext: &[u8]) -> Vec<u8> {
+        self.sealed_asset_for(7, [0xaa; 32], plaintext)
+    }
+
+    /// A sealed asset for an arbitrary release variant and asset KEK. The variant-7 credential
+    /// fixtures unwrap only the `[0xaa; 32]` KEK; any other (variant, KEK) pair must fail.
+    fn sealed_asset_for(&self, variant_id: u64, kek: [u8; 32], plaintext: &[u8]) -> Vec<u8> {
         let seed = self.seed.fetch_add(1, Ordering::SeqCst);
         let mut rng = copylocker_suite_std::test_rng(seed);
         copylocker_proto::SealedAsset::seal::<ClStd1>(
             PRODUCT_ID,
-            7,
+            variant_id,
             FEATURE_ID,
             "fixture.bin",
             plaintext,
-            &Secret::new([0xaa; 32]),
+            &Secret::new(kek),
             &mut rng,
         )
         .unwrap()
@@ -732,6 +738,42 @@ async fn unseal_uses_the_wrapped_kek_and_authenticates_metadata() {
     ));
     assert!(matches!(
         client.unseal("other-feature", &sealed),
+        Err(CoreError::AssetCorrupt)
+    ));
+}
+
+/// The "谎报旧 release_id" scenario (`versioning-and-variants.md` §2/§4.3): an activation that
+/// reports the older release receives the *older* variant's wrapped KEKs, and a newer release's
+/// sealed asset must not open with them — at neither the metadata gate nor the AEAD layer.
+#[tokio::test]
+async fn keks_from_an_older_variant_cannot_unseal_a_newer_releases_asset() {
+    let (client, server, _) = activated().await;
+
+    // Positive control: this activation reported variant 7 and unseals its own variant's asset.
+    let own = server.sealed_asset(b"current release payload");
+    assert_eq!(
+        client.unseal(FEATURE_ID, &own).unwrap(),
+        b"current release payload"
+    );
+
+    // The newer release (variant 8) seals under a *different* asset KEK; the activation's
+    // wrapped KEKs belong to variant 7.
+    let newer = server.sealed_asset_for(8, [0xbb; 32], b"new release payload");
+
+    // Layer 1 — the container names variant 8, which is not this build's variant: the unseal
+    // rejects the metadata before any key material is derived.
+    assert!(matches!(
+        client.unseal(FEATURE_ID, &newer),
+        Err(CoreError::AssetCorrupt)
+    ));
+
+    // Layer 2 — even with the header forged to claim variant 7, the payload still does not
+    // authenticate: the forged variant enters the AAD, and the unwrapped variant-7 KEK is not
+    // the variant-8 sealing key.
+    let mut forged = copylocker_proto::SealedAsset::decode(&newer).unwrap();
+    forged.variant_id = 7;
+    assert!(matches!(
+        client.unseal(FEATURE_ID, &forged.encode()),
         Err(CoreError::AssetCorrupt)
     ));
 }
