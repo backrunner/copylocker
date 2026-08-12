@@ -1,0 +1,7 @@
+node_modules/
+dist/
+
+# Local KEK registries / wrapping keys created while developing this package.
+# A registry or wrapping key must NEVER be committed — see README "Security red lines".
+.copylocker/
+*.sealed

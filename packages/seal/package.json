@@ -1,0 +1,39 @@
+{
+  "name": "@copylocker/seal",
+  "version": "0.1.0",
+  "description": "CopyLocker build-time asset sealing — KEK registry, web v1 sealed-asset containers, and the copylocker-seal CLI.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "copylocker-seal": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.2",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "packages/seal"
+  }
+}
