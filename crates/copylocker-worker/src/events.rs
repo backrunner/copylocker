@@ -1,3 +1,7 @@
+use copylocker_server_core::analytics::{
+    TelemetryValues, DAYS_ACTIVE_CAP, FEATURE_HITS_CAP, HISTOGRAM_BUCKET_CAP, MAX_FEATURE_KEY_LEN,
+    SESSION_COUNT_CAP,
+};
 use copylocker_suite::cbor::{decode_canonical, CborValue, Limits, MapBuilder};
 use copylocker_suite::HashScheme;
 use copylocker_suite_std::Sha256Scheme;
@@ -10,7 +14,26 @@ pub(crate) const AUDIT_ARCHIVE_EVENT: &str = "audit_archive";
 pub(crate) const AUDIT_SCHEMA_VERSION: u8 = 1;
 pub(crate) const ADMIN_AUDIT_ARCHIVE_EVENT: &str = "admin_audit_archive";
 pub(crate) const ADMIN_AUDIT_SCHEMA_VERSION: u8 = 2;
+pub(crate) const SUSPICION_ALERT_EVENT: &str = "suspicion_alert";
+pub(crate) const SUSPICION_ALERT_SCHEMA_VERSION: u8 = 1;
 pub(crate) const ISSUER_SHARDS: u8 = 8;
+
+pub(crate) const ANALYTICS_DETAIL_EVENT: &str = "analytics_detail";
+pub(crate) const ANALYTICS_DETAIL_SCHEMA_VERSION: u8 = 1;
+pub(crate) const ANALYTICS_KIND_CHECK_IN: &str = "check_in";
+pub(crate) const ANALYTICS_KIND_ACTIVATION: &str = "activation";
+pub(crate) const TELEMETRY_DROPPED_NO_CONSENT: &str = "no_consent";
+pub(crate) const TELEMETRY_DROPPED_TIER_GATE: &str = "tier_gate";
+
+/// Clip-event kinds recorded on a detail event (`clip::ClipEvent` serde tags). The daily
+/// rollup maps each kind to an operational counter metric id.
+pub(crate) const CLIP_EVENT_KINDS: [&str; 5] = [
+    "session_count_clipped",
+    "days_active_clipped",
+    "histogram_bucket_clipped",
+    "feature_hits_clipped",
+    "feature_key_dropped",
+];
 
 const AUDIT_CHAIN_LABEL: &[u8] = b"copylocker/issuer-audit/v1";
 const ADMIN_AUDIT_V1_CHAIN_LABEL: &[u8] = b"copylocker/admin-audit/v1";
@@ -88,6 +111,202 @@ pub(crate) struct AdminAuditEvent {
     pub(crate) prev_hash: Vec<u8>,
     pub(crate) hash: Vec<u8>,
     pub(crate) r2_key: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct SuspicionContribution {
+    pub(crate) signal: String,
+    pub(crate) points: u32,
+    pub(crate) max: u32,
+}
+
+/// Outbound anomaly alert (`10-server-worker.md` §2.5): the validate path enqueues it when a
+/// license's suspicion score crosses the configured threshold, and the consumer delivers it to
+/// the vendor's alert webhook. It is a signal, never a verdict.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct SuspicionAlertEvent {
+    pub(crate) event: String,
+    pub(crate) schema_version: u8,
+    pub(crate) occurred_at: i64,
+    pub(crate) product_id: String,
+    pub(crate) license_id: String,
+    pub(crate) machine_id: String,
+    pub(crate) score: u8,
+    pub(crate) previous_score: u8,
+    pub(crate) threshold: u8,
+    pub(crate) contributions: Vec<SuspicionContribution>,
+}
+
+impl SuspicionAlertEvent {
+    pub(crate) fn is_valid(&self) -> bool {
+        let valid_hex_id =
+            |value: &str| value.len() == 32 && value.bytes().all(|byte| byte.is_ascii_hexdigit());
+        self.event == SUSPICION_ALERT_EVENT
+            && self.schema_version == SUSPICION_ALERT_SCHEMA_VERSION
+            && self.occurred_at >= 0
+            && !self.product_id.is_empty()
+            && self.product_id.len() <= 128
+            && valid_hex_id(&self.license_id)
+            && valid_hex_id(&self.machine_id)
+            && self.score <= 100
+            && self.previous_score <= 100
+            && (1..=100).contains(&self.threshold)
+            && self.score >= self.threshold
+            && self.previous_score < self.threshold
+            && self.contributions.len() <= 8
+            && self
+                .contributions
+                .iter()
+                .all(|contribution| contribution.points <= contribution.max)
+    }
+}
+
+/// One machine-day detail record (`90-analytics-telemetry.md §5`): produced by the request
+/// path on every successful activation or validate check-in, archived to R2 by the queue
+/// consumer, and aggregated by the daily rollup cron. The machine is only ever identified
+/// by its pseudonymous `machine_key` (`HMAC(analytics_pepper, machine_id)`).
+///
+/// T1 telemetry rides along only after the tier gate, the consent gate, and clipping have
+/// all passed on the request path; drops and clips are recorded so the rollup can count
+/// them as operational anomalies.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub(crate) struct AnalyticsDetailEvent {
+    pub(crate) event: String,
+    pub(crate) schema_version: u8,
+    /// Random 16-byte hex id minted on the request path; makes queue redelivery idempotent
+    /// because the R2 object key derives from it.
+    pub(crate) record_id: String,
+    pub(crate) occurred_at: i64,
+    pub(crate) kind: String,
+    pub(crate) product_id: String,
+    // NOTE: no `serde_bytes` here. Queue payloads are serialized with
+    // `serde_wasm_bindgen` (producer) and JSON-stringified by the Cloudflare Queues
+    // JSON content type; `serde_bytes` would produce a `Uint8Array`, which JSON
+    // stringifies to `{"0":…,"1":…}` and then fails to deserialize on the consumer,
+    // silently discarding every detail event. A plain `Vec<u8>` is a JS number array
+    // both ways and is byte-identical for the R2 `serde_json` archive path.
+    pub(crate) machine_key: Vec<u8>,
+    pub(crate) app_version: String,
+    pub(crate) os: String,
+    pub(crate) arch: String,
+    /// `cf.country` of the request (country level only, never an IP). Absent dimensions
+    /// simply form no bucket in the country cube.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) country: Option<String>,
+    pub(crate) activation_path: String,
+    pub(crate) mode: String,
+    pub(crate) release_id: String,
+    pub(crate) policy_id: String,
+    pub(crate) sdk_version: String,
+    /// Activations only: the seat reservation reused an existing machine row, so the
+    /// activation is not an `act.new` (`90-analytics-telemetry.md §2.1`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) reused: Option<bool>,
+    /// Clipped, consent-gated T1 values; absent when nothing was reported or the block
+    /// was dropped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) telemetry: Option<TelemetryValues>,
+    /// Why a reported telemetry block was dropped (`no_consent` | `tier_gate`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) telemetry_dropped: Option<String>,
+    /// Kinds of every clip applied to the accepted block (see [`CLIP_EVENT_KINDS`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) clip_events: Vec<String>,
+}
+
+impl AnalyticsDetailEvent {
+    pub(crate) fn is_valid(&self) -> bool {
+        let telemetry_is_valid = self.telemetry.as_ref().is_none_or(|values| {
+            values.consent_version >= 1
+                && values.session_count <= SESSION_COUNT_CAP
+                && values.days_active <= DAYS_ACTIVE_CAP
+                && values
+                    .session_duration_histogram
+                    .iter()
+                    .all(|count| *count <= HISTOGRAM_BUCKET_CAP)
+                && values.feature_hits.len() <= 64
+                && values.feature_hits.iter().all(|(key, hits)| {
+                    !key.is_empty() && key.len() <= MAX_FEATURE_KEY_LEN && *hits <= FEATURE_HITS_CAP
+                })
+        });
+        self.event == ANALYTICS_DETAIL_EVENT
+            && self.schema_version == ANALYTICS_DETAIL_SCHEMA_VERSION
+            && is_lower_hex(&self.record_id, 32)
+            && (0..=MAX_SAFE_INTEGER).contains(&self.occurred_at)
+            && matches!(
+                self.kind.as_str(),
+                ANALYTICS_KIND_CHECK_IN | ANALYTICS_KIND_ACTIVATION
+            )
+            && (self.kind == ANALYTICS_KIND_ACTIVATION) == self.reused.is_some()
+            && is_product_id(&self.product_id)
+            && self.machine_key.len() == 32
+            && cube_dimension(&self.app_version, 128)
+            && cube_dimension(&self.os, 128)
+            && cube_dimension(&self.arch, 128)
+            && self
+                .country
+                .as_ref()
+                .is_none_or(|value| cube_dimension(value, 16))
+            && matches!(
+                self.activation_path.as_str(),
+                "online" | "offline_ar" | "olk" | "account"
+            )
+            && matches!(self.mode.as_str(), "O" | "E")
+            && cube_dimension(&self.release_id, 128)
+            && cube_dimension(&self.policy_id, 128)
+            && cube_dimension(&self.sdk_version, 128)
+            && telemetry_is_valid
+            && !(self.telemetry.is_some() && self.telemetry_dropped.is_some())
+            && self.telemetry_dropped.as_ref().is_none_or(|reason| {
+                matches!(
+                    reason.as_str(),
+                    TELEMETRY_DROPPED_NO_CONSENT | TELEMETRY_DROPPED_TIER_GATE
+                )
+            })
+            && self.clip_events.len() <= 16
+            && self
+                .clip_events
+                .iter()
+                .all(|kind| CLIP_EVENT_KINDS.contains(&kind.as_str()))
+            && (self.telemetry.is_some() || self.clip_events.is_empty())
+    }
+}
+
+/// The R2 object key of one detail record: `analytics/raw/<product>/<date>/<record>.json`
+/// (`90-analytics-telemetry.md §5`), where `<date>` is the UTC calendar day of
+/// `occurred_at`. The consumer writes it conditionally, so a redelivered message rewrites
+/// identical bytes instead of duplicating the record.
+pub(crate) fn analytics_r2_key(
+    product_id: &str,
+    occurred_at: i64,
+    record_id: &str,
+) -> Option<String> {
+    if !is_product_id(product_id) || !is_lower_hex(record_id, 32) {
+        return None;
+    }
+    let date = utc_day_string(occurred_at)?;
+    Some(format!(
+        "analytics/raw/{product_id}/{date}/{record_id}.json"
+    ))
+}
+
+/// The UTC calendar day (`YYYY-MM-DD`) containing `occurred_at`.
+pub(crate) fn utc_day_string(occurred_at: i64) -> Option<String> {
+    if occurred_at < 0 {
+        return None;
+    }
+    let (year, month, day) = civil_from_days(occurred_at / 86_400)?;
+    Some(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+fn bounded_non_empty(value: &str, max_len: usize) -> bool {
+    !value.is_empty() && value.len() <= max_len
+}
+
+/// Cube dimension values must never contain the `|` separator (`CubeKey` encoding), so a
+/// valid event always constructs valid cube keys.
+fn cube_dimension(value: &str, max_len: usize) -> bool {
+    bounded_non_empty(value, max_len) && !value.contains('|')
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -779,7 +998,7 @@ fn civil_from_days(days_since_epoch: i64) -> Option<(i64, i64, i64)> {
     (1970..=9999).contains(&year).then_some((year, month, day))
 }
 
-fn is_product_id(value: &str) -> bool {
+pub(crate) fn is_product_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value

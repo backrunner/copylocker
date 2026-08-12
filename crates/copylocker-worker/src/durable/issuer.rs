@@ -161,10 +161,11 @@ impl IssuerDO {
             }
         };
 
-        if !validate_tbs(&input, kind, &epoch_key) {
+        let test_environment = crate::suites::is_test_environment(&self.env);
+        let Some(artifact_suite) = validate_tbs(&input, kind, &epoch_key, test_environment) else {
             return internal_error(400, "invalid_artifact");
-        }
-        let envelope = match sign_envelope(&input, kind, &epoch_key) {
+        };
+        let envelope = match sign_envelope(&input, kind, &epoch_key, artifact_suite) {
             Ok(envelope) => envelope,
             Err(error) => {
                 worker::console_error!(
@@ -421,27 +422,50 @@ fn validate_issue_request(input: &IssueRequest) -> Option<ArtifactKind> {
     valid.then_some(kind)
 }
 
-fn validate_tbs(input: &IssueRequest, kind: ArtifactKind, key: &EpochKey) -> bool {
-    match kind {
-        ArtifactKind::MachineCred => MachineCredential::from_canonical(&input.tbs).is_ok_and(|a| {
-            a.suite_id == key.suite_id
-                && a.epoch_id == key.epoch_id
-                && a.product_id == input.product_id
-                && a.license_id.as_bytes() == input.routing_key.as_slice()
-                && a.license_id.as_bytes() == input.subject.as_slice()
-        }),
-        ArtifactKind::ValidationTicket => {
-            ValidationTicket::from_canonical(&input.tbs).is_ok_and(|a| {
-                a.suite_id == key.suite_id
-                    && a.epoch_id == key.epoch_id
-                    && a.machine_id.as_bytes() == input.subject.as_slice()
-            })
+/// Validate the to-be-signed artifact and return the suite it must be signed under.
+///
+/// Production accepts only the epoch key's own suite (CL-STD-1), which keeps the historical
+/// behavior byte-identical. Under `ENVIRONMENT == "test"` the synthetic `CL-TST-1` suite is
+/// also accepted so the multi-suite request path is exercised end to end; the envelope and the
+/// signature domain then carry the artifact's suite, never the key's.
+fn validate_tbs(
+    input: &IssueRequest,
+    kind: ArtifactKind,
+    key: &EpochKey,
+    test_environment: bool,
+) -> Option<SuiteId> {
+    let supported = |suite_id: SuiteId| -> Option<SuiteId> {
+        if suite_id == key.suite_id
+            || (test_environment && suite_id == crate::suites::TEST_SUITE_ID)
+        {
+            Some(suite_id)
+        } else {
+            None
         }
-        ArtifactKind::KillOrder => KillOrder::from_canonical(&input.tbs).is_ok_and(|a| {
-            a.suite_id == key.suite_id && a.machine_id.as_bytes() == input.subject.as_slice()
-        }),
-        ArtifactKind::RevocationBatch => {
-            RevocationBatch::from_canonical(&input.tbs).is_ok_and(|batch| {
+    };
+    match kind {
+        ArtifactKind::MachineCred => MachineCredential::from_canonical(&input.tbs)
+            .ok()
+            .filter(|a| {
+                a.epoch_id == key.epoch_id
+                    && a.product_id == input.product_id
+                    && a.license_id.as_bytes() == input.routing_key.as_slice()
+                    && a.license_id.as_bytes() == input.subject.as_slice()
+            })
+            .and_then(|a| supported(a.suite_id)),
+        ArtifactKind::ValidationTicket => ValidationTicket::from_canonical(&input.tbs)
+            .ok()
+            .filter(|a| {
+                a.epoch_id == key.epoch_id && a.machine_id.as_bytes() == input.subject.as_slice()
+            })
+            .and_then(|a| supported(a.suite_id)),
+        ArtifactKind::KillOrder => KillOrder::from_canonical(&input.tbs)
+            .ok()
+            .filter(|a| a.machine_id.as_bytes() == input.subject.as_slice())
+            .and_then(|a| supported(a.suite_id)),
+        ArtifactKind::RevocationBatch => RevocationBatch::from_canonical(&input.tbs)
+            .ok()
+            .filter(|batch| {
                 let subject = input.subject.as_slice();
                 let subject_is_revoked = batch
                     .revoked_license_ids
@@ -456,37 +480,37 @@ fn validate_tbs(input: &IssueRequest, kind: ArtifactKind, key: &EpochKey) -> boo
                         .iter()
                         .any(|id| id.as_bytes() == subject);
                 batch.proto_ver == copylocker_types::PROTO_VER
-                    && batch.suite_id == key.suite_id
                     && batch.from_epoch > 0
                     && batch.from_epoch <= batch.to_epoch
                     && subject_is_revoked
             })
-        }
-        ArtifactKind::OfflineLicenseKey => {
-            OfflineLicenseKey::from_canonical(&input.tbs).is_ok_and(|a| {
-                a.suite_id == key.suite_id
-                    && a.epoch_id == key.epoch_id
+            .and_then(|batch| supported(batch.suite_id)),
+        ArtifactKind::OfflineLicenseKey => OfflineLicenseKey::from_canonical(&input.tbs)
+            .ok()
+            .filter(|a| {
+                a.epoch_id == key.epoch_id
                     && a.product_id == input.product_id
                     && a.license_id.as_bytes() == input.routing_key.as_slice()
                     && a.license_id.as_bytes() == input.subject.as_slice()
             })
-        }
+            .and_then(|a| supported(a.suite_id)),
         ArtifactKind::ActivationResponse => ActivationResponse::from_canonical(&input.tbs)
-            .is_ok_and(|response| {
-                if response.suite_id != key.suite_id {
-                    return false;
-                }
+            .ok()
+            .and_then(|response| {
+                let suite = supported(response.suite_id)?;
                 Envelope::decode(&response.credential)
                     .and_then(|envelope| envelope.peek_unverified::<MachineCredential>())
-                    .is_ok_and(|credential| {
-                        credential.suite_id == key.suite_id
+                    .ok()
+                    .filter(|credential| {
+                        credential.suite_id == suite
                             && credential.epoch_id == key.epoch_id
                             && credential.product_id == input.product_id
                             && credential.license_id.as_bytes() == input.routing_key.as_slice()
                             && credential.license_id.as_bytes() == input.subject.as_slice()
-                    })
+                    })?;
+                Some(suite)
             }),
-        _ => false,
+        _ => None,
     }
 }
 
@@ -494,12 +518,13 @@ fn sign_envelope(
     input: &IssueRequest,
     kind: ArtifactKind,
     key: &EpochKey,
+    suite_id: SuiteId,
 ) -> std::result::Result<Vec<u8>, copylocker_proto::ProtoError> {
-    let context = DomainCtx::new(kind, key.suite_id, &input.product_id);
+    let context = DomainCtx::new(kind, suite_id, &input.product_id);
     let signature = HybridSig::sign(&key.signing_key, context, &input.tbs)?;
     Ok(Envelope {
         proto_ver: copylocker_types::PROTO_VER,
-        suite_id: key.suite_id,
+        suite_id,
         kind,
         tbs: input.tbs.clone(),
         sig: signature.0,
@@ -760,9 +785,12 @@ mod tests {
                 .to_canonical()
                 .map_err(|error| format!("{error:?}"))?,
         );
-        assert!(validate_tbs(&input, ArtifactKind::KillOrder, &key));
+        assert_eq!(
+            validate_tbs(&input, ArtifactKind::KillOrder, &key, false),
+            Some(key.suite_id)
+        );
 
-        let encoded = sign_envelope(&input, ArtifactKind::KillOrder, &key)
+        let encoded = sign_envelope(&input, ArtifactKind::KillOrder, &key, key.suite_id)
             .map_err(|error| error.to_string())?;
         let envelope = Envelope::decode(&encoded).map_err(|error| error.to_string())?;
         let verifying_key = HybridSig::verifying_key(&key.signing_key);
@@ -791,7 +819,54 @@ mod tests {
                 .to_canonical()
                 .map_err(|error| format!("{error:?}"))?,
         );
-        assert!(!validate_tbs(&input, ArtifactKind::KillOrder, &key));
+        assert_eq!(
+            validate_tbs(&input, ArtifactKind::KillOrder, &key, false),
+            None
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn the_test_suite_is_accepted_only_in_the_test_environment() -> std::result::Result<(), String>
+    {
+        let key = key()?;
+        let artifact = KillOrder {
+            proto_ver: copylocker_types::PROTO_VER,
+            suite_id: crate::suites::TEST_SUITE_ID,
+            machine_id: MachineId([4; 16]),
+            nonce_c_echo: [5; 32],
+            server_time: 1_700_000_000,
+            reason: KillReason::RevokedLicense,
+            user_message: None,
+            revocation_epoch: 7,
+        };
+        let input = request(
+            artifact
+                .to_canonical()
+                .map_err(|error| format!("{error:?}"))?,
+        );
+        assert_eq!(
+            validate_tbs(&input, ArtifactKind::KillOrder, &key, false),
+            None
+        );
+        assert_eq!(
+            validate_tbs(&input, ArtifactKind::KillOrder, &key, true),
+            Some(crate::suites::TEST_SUITE_ID)
+        );
+        let encoded = sign_envelope(
+            &input,
+            ArtifactKind::KillOrder,
+            &key,
+            crate::suites::TEST_SUITE_ID,
+        )
+        .map_err(|error| error.to_string())?;
+        let envelope = Envelope::decode(&encoded).map_err(|error| error.to_string())?;
+        assert_eq!(envelope.suite_id, crate::suites::TEST_SUITE_ID);
+        let verifying_key = HybridSig::verifying_key(&key.signing_key);
+        let opened = envelope
+            .open::<HybridSig, KillOrder>(&input.product_id, &verifying_key)
+            .map_err(|error| error.to_string())?;
+        assert_eq!(opened, artifact);
         Ok(())
     }
 

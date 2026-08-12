@@ -25,6 +25,12 @@ pub(super) async fn route(request: &mut Request, env: &Env, segments: &[&str]) -
         ["licenses", license_id, "machines"] if !license_id.is_empty() => {
             machines(request, env, license_id).await
         }
+        ["licenses", license_id, "offline-key"] if !license_id.is_empty() => {
+            if request.method() != Method::Post {
+                return method_not_allowed();
+            }
+            super::offline_key::issue_offline_key(request, env, license_id).await
+        }
         _ => not_found("license route not found"),
     }
 }

@@ -8,10 +8,12 @@ use serde_json::Value;
 use sha2::Sha256;
 use worker::wasm_bindgen::JsValue;
 use worker::{
-    D1Database, D1SessionConstraint, D1Type, Date, Env, Method, Request, Response, Result,
+    D1Database, D1SessionConstraint, D1Type, Date, Env, Fetch, Headers, Method, Request,
+    RequestInit, Response, Result,
 };
 use zeroize::Zeroize;
 
+use crate::events::SuspicionAlertEvent;
 use crate::middleware::body::{self, BodyError};
 use crate::response;
 
@@ -232,6 +234,49 @@ pub(crate) async fn process(env: &Env, event: &BillingWebhookEvent) -> Result<()
         }
         kind => process_existing(&database, event, kind).await,
     }
+}
+
+/// Deliver a crossed-threshold anomaly alert to the vendor-configured webhook
+/// (`10-server-worker.md` §2.5). Independent of the inbound billing webhooks: without a
+/// configured URL the crossing is only recorded in the logs and the event is acked.
+pub(crate) async fn deliver_suspicion_alert(env: &Env, event: &SuspicionAlertEvent) -> Result<()> {
+    let database = env.d1("DB")?;
+    let config = crate::admin_resources::load_alert_config(&database, &event.product_id).await?;
+    let Some(url) = config.url else {
+        worker::console_log!(
+            "{}",
+            serde_json::json!({
+                "level": "warn",
+                "message": "suspicion threshold crossed without a configured alert webhook",
+                "product_id": event.product_id,
+                "license_id": event.license_id,
+                "machine_id": event.machine_id,
+                "score": event.score,
+                "threshold": event.threshold,
+            })
+        );
+        return Ok(());
+    };
+    let payload = serde_json::to_string(event)?;
+    let headers = Headers::new();
+    headers.set("Content-Type", "application/json")?;
+    headers.set(
+        "User-Agent",
+        concat!("copylocker-worker/", env!("CARGO_PKG_VERSION")),
+    )?;
+    let mut init = RequestInit::new();
+    init.with_method(Method::Post)
+        .with_headers(headers)
+        .with_body(Some(JsValue::from_str(&payload)));
+    let request = Request::new_with_init(&url, &init)?;
+    let response = Fetch::Request(request).send().await?;
+    if !(200..300).contains(&response.status_code()) {
+        return Err(worker::Error::RustError(format!(
+            "suspicion alert webhook returned HTTP {}",
+            response.status_code()
+        )));
+    }
+    Ok(())
 }
 
 pub(crate) async fn reconcile_due(env: &Env) -> Result<usize> {

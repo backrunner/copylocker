@@ -15,7 +15,6 @@ const FAST_SECRET_SCHEMA_VERSION: u8 = 1;
 
 pub(crate) struct FastEpochSigner {
     epoch_id: EpochId,
-    suite_id: SuiteId,
     signing_key: FastSigningKey,
 }
 
@@ -34,10 +33,18 @@ impl FastEpochSigner {
         parsed
     }
 
-    pub(crate) fn seal<A: Artifact>(&self, artifact: &A, product_id: &str) -> Result<Vec<u8>> {
+    /// Seal an artifact with the fast epoch key. The envelope header and signature domain take
+    /// the *artifact's* suite (resolved and validated by the caller against the supported-suite
+    /// registry), while the signing key itself stays the registered CL-STD-1 epoch key.
+    pub(crate) fn seal<A: Artifact>(
+        &self,
+        artifact: &A,
+        product_id: &str,
+        suite_id: SuiteId,
+    ) -> Result<Vec<u8>> {
         Envelope::seal::<FastSig, A>(
             artifact,
-            self.suite_id,
+            suite_id,
             product_id,
             Some(self.epoch_id),
             &self.signing_key,
@@ -78,7 +85,6 @@ fn parse_secret(value: &str, expected: &SigningEpoch) -> Result<FastEpochSigner>
     }
     Ok(FastEpochSigner {
         epoch_id: expected.epoch_id,
-        suite_id: copylocker_suite_std::CL_STD_1_SUITE_ID,
         signing_key,
     })
 }

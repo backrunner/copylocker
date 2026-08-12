@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use copylocker_proto::{Envelope, MachineCredential};
+use copylocker_server_core::anomaly::{score as anomaly_score, AnomalySignals};
 use copylocker_server_core::deactivate::plan as plan_deactivation;
 use copylocker_server_core::heartbeat::{plan as plan_heartbeat, zombie_cutoff};
 use copylocker_server_core::revoke::{
@@ -20,7 +21,8 @@ use worker::{
 
 use super::{ready, unavailable};
 use crate::events::{
-    MachineProjection, ProjectionEvent, LICENSE_PROJECTION_EVENT, PROJECTION_SCHEMA_VERSION,
+    MachineProjection, ProjectionEvent, SuspicionContribution, LICENSE_PROJECTION_EVENT,
+    PROJECTION_SCHEMA_VERSION,
 };
 use crate::middleware::body::{self, BodyError};
 use crate::response;
@@ -116,6 +118,8 @@ const LICENSE_SCHEMA_VERSION: i32 = 4;
 const MAX_CREDENTIAL_STATE: usize = 256;
 const OUTBOX_BATCH_SIZE: i64 = 100;
 const OPERATION_HASH_LABEL: &[u8] = b"copylocker/license-operation/v1";
+/// Anomaly counters reset after this window (`anomaly.rs` signal definitions).
+const ANOMALY_WINDOW_SECS: i64 = 24 * 60 * 60;
 
 #[durable_object]
 #[derive(Debug)]
@@ -154,6 +158,7 @@ impl DurableObject for LicenseDO {
             (Method::Post, "/heartbeat") => self.heartbeat(&mut request).await,
             (Method::Post, "/revoke") => self.revoke(&mut request).await,
             (Method::Post, "/admin-update") => self.admin_update(&mut request).await,
+            (Method::Post, "/admin-forget") => self.admin_forget(&mut request).await,
             (Method::Post, "/validate") => self.validate(&mut request).await,
             (Method::Get, _) => internal_error(404, "not_found"),
             _ => internal_error(405, "method_not_allowed"),
@@ -364,6 +369,76 @@ impl LicenseDO {
         )
     }
 
+    /// GDPR delete, DO leg (`data-model.md §14`): drop the activation row outright.
+    /// Unlike deactivate/revoke this is an Admin-driven erase, not a state transition, so
+    /// no projection is appended — the Admin operation deletes the D1 `machines` row in
+    /// the same journal batch, and a projection upsert would resurrect it.
+    async fn admin_forget(&self, request: &mut Request) -> Result<Response> {
+        let Some(input) = parse_json::<AdminForgetRequest>(request).await? else {
+            return internal_error(400, "invalid_request");
+        };
+        if input.license_id.len() != LicenseId::LEN
+            || input.machine_id.len() != MachineId::LEN
+            || input.operation_id.is_empty()
+            || input.operation_id.len() > 512
+            || input
+                .operation_id
+                .bytes()
+                .any(|byte| !byte.is_ascii_graphic())
+        {
+            return internal_error(400, "invalid_request");
+        }
+        if !self.owns_license(&input.license_id)? {
+            return internal_error(409, "identity_conflict");
+        }
+
+        let encoded = serde_json::to_vec(&input)?;
+        let request_hash =
+            Sha256Scheme::hash_parts(&[OPERATION_HASH_LABEL, b"admin-forget", &encoded]);
+        let cache_key = format!("forget:{}", input.operation_id);
+        let sql = self.state.storage().sql();
+        match load_operation_response(&sql, &cache_key, "admin-forget", request_hash.as_bytes())? {
+            OperationReplay::Completed => {
+                return response::json(
+                    200,
+                    &AdminForgetResponse {
+                        ok: true,
+                        forgotten: false,
+                    },
+                );
+            }
+            OperationReplay::Conflict => return internal_error(409, "idempotency_conflict"),
+            OperationReplay::Missing => {}
+        }
+
+        // An uninitialized DO holds no activations for this license; forgetting is a no-op.
+        let forgotten =
+            if meta_blob(&sql, "license_id")?.as_deref() == Some(input.license_id.as_slice()) {
+                sql.exec(
+                    "DELETE FROM activations WHERE machine_id = ?",
+                    Some(vec![input.machine_id.into()]),
+                )?
+                .rows_written()
+                    > 0
+            } else {
+                false
+            };
+        store_operation_response(
+            &sql,
+            &cache_key,
+            "admin-forget",
+            request_hash.as_bytes(),
+            now_seconds(),
+        )?;
+        response::json(
+            200,
+            &AdminForgetResponse {
+                ok: true,
+                forgotten,
+            },
+        )
+    }
+
     async fn reserve(&self, request: &mut Request) -> Result<Response> {
         let Some(input) = parse_json::<ReserveRequest>(request).await? else {
             return internal_error(400, "invalid_request");
@@ -383,7 +458,15 @@ impl LicenseDO {
             return internal_error(401, "invalid_credential");
         }
         let revocation_epoch = meta_i64(&sql, "revocation_epoch")?.unwrap_or(0);
-        let security_floor = meta_i64(&sql, "security_floor")?.unwrap_or(0);
+        let Ok(authoritative_security_floor) = i64::try_from(input.authoritative_security_floor)
+        else {
+            return internal_error(400, "invalid_request");
+        };
+        let stored_security_floor = meta_i64(&sql, "security_floor")?.unwrap_or(0);
+        let security_floor = stored_security_floor.max(authoritative_security_floor);
+        if security_floor != stored_security_floor {
+            upsert_meta(&sql, "security_floor", security_floor.into())?;
+        }
 
         let cache_key = format!("reserve:{}", input.idempotency_key);
         let request_hash = reserve_request_hash(&input)?;
@@ -483,6 +566,13 @@ impl LicenseDO {
                     input.geo.clone().into(),
                     input.credential_state.clone().into(),
                 ]),
+            )?;
+            // Score the freshly added device: a new fingerprint joining the license is exactly
+            // the spread signal `anomaly.rs` weights highest.
+            let suspicion = score_activation(&sql, seats, now)?;
+            sql.exec(
+                "UPDATE activations SET suspicion = ? WHERE machine_id = ?",
+                Some(vec![suspicion.into(), input.machine_id.clone().into()]),
             )?;
             append_projection(&sql, Some(&input.machine_id), now)?;
             (
@@ -898,6 +988,10 @@ impl LicenseDO {
         let Ok(known_security_floor) = i64::try_from(input.known_security_floor) else {
             return internal_error(401, "invalid_credential");
         };
+        let Ok(authoritative_security_floor) = i64::try_from(input.authoritative_security_floor)
+        else {
+            return internal_error(400, "invalid_request");
+        };
         let Some(activation) =
             self.authenticate_device(&sql, &input.auth, ArtifactKind::ValidateRequest)?
         else {
@@ -905,12 +999,16 @@ impl LicenseDO {
         };
         let local_revocation_epoch = meta_i64(&sql, "revocation_epoch")?.unwrap_or(0);
         let revocation_epoch = local_revocation_epoch.max(authoritative_revocation_epoch);
-        let security_floor = meta_i64(&sql, "security_floor")?.unwrap_or(0);
+        let stored_security_floor = meta_i64(&sql, "security_floor")?.unwrap_or(0);
+        let security_floor = stored_security_floor.max(authoritative_security_floor);
         if known_revocation_epoch > revocation_epoch || known_security_floor > security_floor {
             return internal_error(401, "invalid_credential");
         }
         if revocation_epoch != local_revocation_epoch {
             upsert_meta(&sql, "revocation_epoch", revocation_epoch.into())?;
+        }
+        if security_floor != stored_security_floor {
+            upsert_meta(&sql, "security_floor", security_floor.into())?;
         }
         if !record_nonce(&sql, &input.auth.nonce, now)? {
             return internal_error(409, "replayed_nonce");
@@ -936,8 +1034,11 @@ impl LicenseDO {
                 revocation_epoch,
                 security_floor,
                 suspicion: activation.suspicion,
+                previous_suspicion: activation.suspicion,
+                suspicion_contributions: None,
                 fingerprint: None,
                 credential_state: None,
+                activation_path: None,
             }
         } else {
             if license_status.as_deref() != Some("active")
@@ -956,6 +1057,11 @@ impl LicenseDO {
                     input.auth.machine_id.clone().into(),
                 ]),
             )?;
+            let (suspicion, contributions) = refresh_suspicion(&sql, &input, now)?;
+            sql.exec(
+                "UPDATE activations SET suspicion = ? WHERE machine_id = ?",
+                Some(vec![suspicion.into(), input.auth.machine_id.clone().into()]),
+            )?;
             append_projection(&sql, Some(&input.auth.machine_id), now)?;
             ValidateStateResponse {
                 ok: true,
@@ -963,9 +1069,12 @@ impl LicenseDO {
                 kill_reason: None,
                 revocation_epoch,
                 security_floor,
-                suspicion: activation.suspicion,
+                suspicion,
+                previous_suspicion: activation.suspicion,
+                suspicion_contributions: Some(contributions),
                 fingerprint: Some(activation.fingerprint),
                 credential_state: activation.credential_state,
+                activation_path: Some(activation.activation_path),
             }
         };
 
@@ -1004,7 +1113,8 @@ impl LicenseDO {
         };
         let activation = sql
             .exec(
-                "SELECT device_sig_vk, status, suspicion, fingerprint, credential_state \
+                "SELECT device_sig_vk, status, suspicion, fingerprint, credential_state, \
+                 activation_path \
                  FROM activations WHERE machine_id = ?",
                 Some(vec![input.machine_id.clone().into()]),
             )?
@@ -1214,6 +1324,13 @@ struct AdminUpdateRequest {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct AdminForgetRequest {
+    license_id: Vec<u8>,
+    machine_id: Vec<u8>,
+    operation_id: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct ReserveRequest {
     idempotency_key: String,
     #[serde(default)]
@@ -1243,6 +1360,8 @@ struct ReserveRequest {
     geo: Option<String>,
     #[serde(default)]
     credential_state: Option<Vec<u8>>,
+    #[serde(default)]
+    authoritative_security_floor: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1280,6 +1399,8 @@ struct ValidateMachineRequest {
     not_after: i64,
     #[serde(default)]
     variant_id: Option<i64>,
+    #[serde(default)]
+    authoritative_security_floor: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -1389,6 +1510,12 @@ struct AdminUpdateResponse {
 }
 
 #[derive(Debug, Serialize)]
+struct AdminForgetResponse {
+    ok: bool,
+    forgotten: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct HeartbeatResponse {
     ok: bool,
     next_after: i64,
@@ -1409,9 +1536,16 @@ struct ValidateStateResponse {
     revocation_epoch: i64,
     security_floor: i64,
     suspicion: i64,
+    previous_suspicion: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    suspicion_contributions: Option<Vec<SuspicionContribution>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     fingerprint: Option<Vec<u8>>,
     credential_state: Option<Vec<u8>>,
+    /// How the machine first activated (`90-analytics-telemetry.md §4.2` cube_4); present
+    /// on ticket outcomes so the worker can snapshot it into the analytics detail stream.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    activation_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1476,6 +1610,7 @@ struct AuthenticatedActivation {
     fingerprint: Vec<u8>,
     #[serde(default, with = "serde_bytes")]
     credential_state: Option<Vec<u8>>,
+    activation_path: String,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1526,6 +1661,109 @@ async fn parse_json<T: DeserializeOwned>(request: &mut Request) -> Result<Option
         Err(_) => return Ok(None),
     };
     Ok(serde_json::from_slice(&bytes).ok())
+}
+
+/// Recompute the license-level anomaly score (`anomaly.rs`) for the validating activation.
+///
+/// Two signals stay unpopulated by design: `impossible_travel` (neither validate nor reserve
+/// currently receives a trusted geo signal, so there is no previous country to compare) and
+/// `attr_churn` (attributes are only captured at activation; validate carries no attribute
+/// updates). They contribute zero rather than a guess.
+fn refresh_suspicion(
+    sql: &SqlStorage,
+    input: &ValidateMachineRequest,
+    now: i64,
+) -> Result<(i64, Vec<SuspicionContribution>)> {
+    let window_start = meta_i64(sql, "anomaly_window_start")?;
+    let window_count = meta_i64(sql, "anomaly_window_count")?.unwrap_or(0);
+    let (window_start, window_count) = match window_start {
+        Some(start) if start >= 0 && now.saturating_sub(start) < ANOMALY_WINDOW_SECS => {
+            (start, window_count.saturating_add(1))
+        }
+        _ => (now, 1),
+    };
+    upsert_meta(sql, "anomaly_window_start", window_start.into())?;
+    upsert_meta(sql, "anomaly_window_count", window_count.into())?;
+
+    let active = sql
+        .exec(
+            "SELECT COUNT(*) AS count FROM activations WHERE status IN (0, 3)",
+            None,
+        )?
+        .one::<CountRow>()?
+        .count;
+    if active < 0 {
+        return Err(worker::Error::RustError(
+            "activation count is invalid".to_owned(),
+        ));
+    }
+    let interval = input.next_refresh_after.saturating_sub(now).max(1);
+    let per_machine = ANOMALY_WINDOW_SECS / interval + 1;
+    let expected = per_machine
+        .saturating_mul(active.max(1))
+        .min(i64::from(u32::MAX));
+    let expected_validations = u32::try_from(expected).unwrap_or(u32::MAX);
+    let validations_in_window = u32::try_from(window_count).unwrap_or(u32::MAX);
+    let seats = meta_i64(sql, "seats")?.unwrap_or(0);
+    let signals = anomaly_signals(sql, seats, validations_in_window, expected_validations, now)?;
+    let scored = anomaly_score(&signals);
+    let contributions = scored
+        .contributions
+        .iter()
+        .map(|contribution| SuspicionContribution {
+            signal: contribution.signal.to_owned(),
+            points: contribution.points,
+            max: contribution.max,
+        })
+        .collect();
+    Ok((i64::from(scored.score), contributions))
+}
+
+/// Activation-time score: the call-rate window only exists once validations start, so the
+/// rate signal is inert here (zero observed, one expected).
+fn score_activation(sql: &SqlStorage, seats: i64, now: i64) -> Result<i64> {
+    let signals = anomaly_signals(sql, seats, 0, 1, now)?;
+    Ok(i64::from(anomaly_score(&signals).score))
+}
+
+fn anomaly_signals(
+    sql: &SqlStorage,
+    seats: i64,
+    validations_in_window: u32,
+    expected_validations: u32,
+    now: i64,
+) -> Result<AnomalySignals> {
+    let cutoff = now.saturating_sub(ANOMALY_WINDOW_SECS);
+    let fingerprints = sql
+        .exec(
+            "SELECT COUNT(DISTINCT fingerprint) AS count FROM activations \
+             WHERE COALESCE(last_seen_at, created_at) >= ?",
+            Some(vec![cutoff.into()]),
+        )?
+        .one::<CountRow>()?
+        .count;
+    let versions = sql
+        .exec(
+            "SELECT COUNT(DISTINCT app_version) AS count FROM activations \
+             WHERE app_version IS NOT NULL",
+            None,
+        )?
+        .one::<CountRow>()?
+        .count;
+    if fingerprints < 0 || versions < 0 {
+        return Err(worker::Error::RustError(
+            "anomaly signal counts are invalid".to_owned(),
+        ));
+    }
+    Ok(AnomalySignals {
+        distinct_fingerprints_24h: u32::try_from(fingerprints).unwrap_or(u32::MAX),
+        seats: u32::try_from(seats.max(0)).unwrap_or(u32::MAX),
+        impossible_travel: false,
+        attr_churn: 0,
+        validations_in_window,
+        expected_validations,
+        distinct_app_versions: u32::try_from(versions).unwrap_or(u32::MAX),
+    })
 }
 
 fn validate_reservation(input: &ReserveRequest) -> Option<i64> {

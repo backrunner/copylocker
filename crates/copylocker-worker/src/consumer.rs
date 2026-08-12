@@ -2,11 +2,12 @@ use serde::Deserialize;
 use worker::{Env, MessageBatch, MessageExt, Result};
 
 use crate::events::{
-    AdminAuditEvent, AuditArchiveEvent, ProjectionEvent, ADMIN_AUDIT_ARCHIVE_EVENT,
-    AUDIT_ARCHIVE_EVENT, LICENSE_PROJECTION_EVENT,
+    AdminAuditEvent, AnalyticsDetailEvent, AuditArchiveEvent, ProjectionEvent, SuspicionAlertEvent,
+    ADMIN_AUDIT_ARCHIVE_EVENT, ANALYTICS_DETAIL_EVENT, AUDIT_ARCHIVE_EVENT,
+    LICENSE_PROJECTION_EVENT, SUSPICION_ALERT_EVENT,
 };
 use crate::webhook::{BillingWebhookEvent, BILLING_WEBHOOK_EVENT};
-use crate::{audit, projection, webhook};
+use crate::{analytics, audit, projection, webhook};
 
 pub(crate) async fn consume(batch: MessageBatch<serde_json::Value>, env: &Env) -> Result<()> {
     for message in batch.raw_iter() {
@@ -117,6 +118,58 @@ pub(crate) async fn consume(batch: MessageBatch<serde_json::Value>, env: &Env) -
                         log_invalid_event(
                             &message_id,
                             Some(BILLING_WEBHOOK_EVENT),
+                            &error.to_string(),
+                        );
+                        message.ack();
+                        continue;
+                    }
+                }
+            }
+            SUSPICION_ALERT_EVENT => {
+                let event =
+                    worker::serde_wasm_bindgen::from_value::<SuspicionAlertEvent>(message.body());
+                match event {
+                    Ok(event) if event.is_valid() => {
+                        webhook::deliver_suspicion_alert(env, &event).await
+                    }
+                    Ok(_) => {
+                        log_invalid_event(
+                            &message_id,
+                            Some(SUSPICION_ALERT_EVENT),
+                            "event validation failed",
+                        );
+                        message.ack();
+                        continue;
+                    }
+                    Err(error) => {
+                        log_invalid_event(
+                            &message_id,
+                            Some(SUSPICION_ALERT_EVENT),
+                            &error.to_string(),
+                        );
+                        message.ack();
+                        continue;
+                    }
+                }
+            }
+            ANALYTICS_DETAIL_EVENT => {
+                let event =
+                    worker::serde_wasm_bindgen::from_value::<AnalyticsDetailEvent>(message.body());
+                match event {
+                    Ok(event) if event.is_valid() => analytics::archive_detail(env, &event).await,
+                    Ok(_) => {
+                        log_invalid_event(
+                            &message_id,
+                            Some(ANALYTICS_DETAIL_EVENT),
+                            "event validation failed",
+                        );
+                        message.ack();
+                        continue;
+                    }
+                    Err(error) => {
+                        log_invalid_event(
+                            &message_id,
+                            Some(ANALYTICS_DETAIL_EVENT),
                             &error.to_string(),
                         );
                         message.ack();

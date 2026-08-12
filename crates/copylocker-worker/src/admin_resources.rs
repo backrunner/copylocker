@@ -11,7 +11,7 @@ use worker::wasm_bindgen::JsValue;
 use worker::{D1Database, D1SessionConstraint, D1Type, Env, Method, Request, Response, Result};
 
 use crate::admin::{
-    authenticate_scope, idempotency_key, now_seconds, unauthorized, valid_identifier,
+    authenticate_any_scope, idempotency_key, now_seconds, unauthorized, valid_identifier,
     AdminPrincipal, AuthResult,
 };
 use crate::admin_operations::{self, NewOperation};
@@ -23,8 +23,20 @@ const MAX_ADMIN_BODY: usize = 256 * 1024;
 const MAX_SAFE_INTEGER: i64 = 9_007_199_254_740_991;
 const MAX_LIST_ITEMS: usize = 1_000;
 
+mod accounts;
+mod analytics_api;
+mod asset_keks;
+mod audit_admin;
+mod dsr;
 mod epochs;
+mod integrity;
 mod licenses;
+mod machines;
+mod offline_key;
+mod products;
+mod releases;
+
+pub(crate) use products::load_alert_config;
 
 pub(crate) async fn route(request: &mut Request, env: &Env) -> Result<Response> {
     let path = request.path();
@@ -34,7 +46,19 @@ pub(crate) async fn route(request: &mut Request, env: &Env) -> Result<Response> 
     let segments = rest.split('/').collect::<Vec<_>>();
     match segments.as_slice() {
         ["licenses", ..] => licenses::route(request, env, &segments).await,
+        ["machines", ..] => machines::route(request, env, &segments).await,
+        ["accounts", ..] => accounts::route(request, env, &segments).await,
         ["epochs", ..] => epochs::route(request, env, &segments).await,
+        ["analytics", ..] => analytics_api::route(request, env, &segments).await,
+        ["audit", ..] => audit_admin::route(request, env, &segments).await,
+        ["dsr", ..] => dsr::route(request, env, &segments).await,
+        ["telemetry", "purge"] => dsr::telemetry_purge(request, env).await,
+        ["asset-keks", ..] => asset_keks::route(request, env, &segments).await,
+        ["integrity", ..] => integrity::route(request, env, &segments).await,
+        ["releases", ..] => releases::route(request, env, &segments).await,
+        ["products", product_id, "alert-webhook"] if !product_id.is_empty() => {
+            products::alert_webhook(request, env, product_id).await
+        }
         ["catalog", collection @ ("features" | "groups" | "tiers")] => {
             catalog_collection(request, env, collection).await
         }
@@ -687,6 +711,7 @@ async fn complete_operation(
         match operation.source_kind.as_str() {
             "license" => licenses::apply_side_effect(env, operation).await?,
             "epoch" => epochs::apply_side_effect(env, operation).await?,
+            "dsr" => dsr::apply_side_effect(env, operation).await?,
             _ => {
                 return Err(worker::Error::RustError(
                     "Admin operation has an unsupported side effect".to_owned(),
@@ -714,14 +739,27 @@ async fn authorize(
     env: &Env,
     required_scope: &str,
 ) -> Result<std::result::Result<AdminPrincipal, Response>> {
+    authorize_any(request, env, &[required_scope]).await
+}
+
+/// Authorize against any one of the accepted scopes (e.g. `machines:r` or its
+/// `machines:rw` counterpart for read endpoints).
+async fn authorize_any(
+    request: &Request,
+    env: &Env,
+    accepted: &[&str],
+) -> Result<std::result::Result<AdminPrincipal, Response>> {
     Ok(
-        match authenticate_scope(request, env, required_scope).await? {
+        match authenticate_any_scope(request, env, accepted).await? {
             AuthResult::Authenticated(principal) => Ok(principal),
             AuthResult::Unauthorized => Err(unauthorized()?),
             AuthResult::Forbidden => Err(response::api_error_no_store(
                 403,
                 "insufficient_scope",
-                &format!("the token does not grant the {required_scope} scope"),
+                &format!(
+                    "the token does not grant any of the {} scopes",
+                    accepted.join(", ")
+                ),
             )?),
         },
     )
@@ -817,6 +855,41 @@ fn product_query(request: &Request) -> Result<std::result::Result<String, Respon
             "invalid_query",
             "exactly one valid product_id query parameter is required",
         )?),
+    })
+}
+
+/// Query contract for destructive resource actions: exactly one `product_id` plus an optional
+/// `dry_run` (default true, the Admin dry-run discipline).
+fn product_dry_run_query(
+    request: &Request,
+) -> Result<std::result::Result<(String, bool), Response>> {
+    let invalid = || {
+        response::api_error_no_store(
+            400,
+            "invalid_query",
+            "exactly one valid product_id and an optional dry_run query parameter are required",
+        )
+    };
+    let mut product_id = None;
+    let mut dry_run = None;
+    for (name, value) in request.url()?.query_pairs() {
+        match name.as_ref() {
+            "product_id" if product_id.is_none() && valid_identifier(&value) => {
+                product_id = Some(value.into_owned());
+            }
+            "dry_run" if dry_run.is_none() => {
+                dry_run = Some(match value.as_ref() {
+                    "true" => true,
+                    "false" => false,
+                    _ => return Ok(Err(invalid()?)),
+                });
+            }
+            _ => return Ok(Err(invalid()?)),
+        }
+    }
+    Ok(match product_id {
+        Some(value) => Ok((value, dry_run.unwrap_or(true))),
+        None => Err(invalid()?),
     })
 }
 

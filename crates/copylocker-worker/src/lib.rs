@@ -2,9 +2,11 @@
 
 #![forbid(unsafe_code)]
 
+mod account;
 mod admin;
 mod admin_operations;
 mod admin_resources;
+mod analytics;
 mod audit;
 mod bindings;
 mod consumer;
@@ -12,9 +14,12 @@ mod durable;
 mod events;
 mod json_cbor;
 mod middleware;
+mod offline;
+mod oidc;
 mod projection;
 mod response;
 mod router;
+mod suites;
 mod webhook;
 
 pub use durable::{AccountDO, AdminAuditDO, IssuerDO, LicenseDO};
@@ -68,8 +73,23 @@ pub(crate) async fn consume_events(
     consumer::consume(batch, &env).await
 }
 
+/// Scheduled dispatch: the every-minute dev trigger (and any other expression) runs the
+/// reconciliation sweep exactly as before; the daily analytics rollup
+/// (`90-analytics-telemetry.md §4.2`) runs only on its own `15 0 * * *` expression.
 #[event(scheduled)]
-pub async fn reconcile_revocations(_event: ScheduledEvent, env: Env, _context: ScheduleContext) {
+pub async fn scheduled(event: ScheduledEvent, env: Env, _context: ScheduleContext) {
+    if event.cron() == analytics::ROLLUP_CRON {
+        if let Err(error) = analytics::rollup_previous_day(&env).await {
+            worker::console_error!(
+                "{}",
+                serde_json::json!({
+                    "level": "error",
+                    "message": "daily analytics rollup failed",
+                    "error": error.to_string()
+                })
+            );
+        }
+    }
     match admin_resources::reconcile_pending_side_effect(&env).await {
         Ok(true) => worker::console_log!(
             "{}",
