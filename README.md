@@ -1,9 +1,17 @@
 # CopyLocker
 
-CopyLocker is a Rust licensing protocol, policy engine, administration CLI, and Cloudflare Worker
-runtime. This workspace currently implements the M1 server administration surface: entitlement
-catalogs, policies, licenses, signing epochs, authenticated Admin API access, and recoverable
-mutation journals.
+CopyLocker is a Rust licensing protocol, policy engine, administration CLI, Cloudflare Worker
+runtime, and client SDK family. The workspace implements the M0–M2 baseline (protocol and
+cryptography, server core, desktop SDKs), the M3 Web SDK (WASM core, `@copylocker/web`, framework
+bindings, browser E2E), and the M4 build toolchain (`@copylocker/unplugin`, `@copylocker/guard`,
+`@copylocker/seal`). See `agent.md` for the current milestone state and evidence.
+
+## Documentation
+
+The documentation site source lives in [`docs/`](docs/) (VitePress; `npm install && npm run dev`
+in that directory). It covers the five-minute quickstart, protection-level guide, licensing
+model, Web SDK, deployment, operations runbook, SLOs, and cost estimation. The security policy
+and residual-risk statement are in [SECURITY.md](SECURITY.md).
 
 ## Workspace
 
@@ -12,6 +20,13 @@ mutation journals.
   adapters, and Admin API.
 - `crates/copylocker-server-core`: storage-independent catalog, policy, and entitlement logic.
 - `crates/copylocker-proto`, `copylocker-suite*`, and `copylocker-types`: protocol and cryptography.
+- `crates/copylocker-core`, `copylocker-store`, `copylocker-fingerprint`, `copylocker-client`:
+  the desktop client core, protected storage, device fingerprinting, and async facade.
+- `crates/copylocker-tauri`, `copylocker-node`, `copylocker-ffi`: native SDK surfaces.
+- `crates/copylocker-wasm`: the browser WASM core with the opaque `step()` interface.
+- `packages/`: TypeScript packages — `web`, `react`, `vue`, `svelte`, `tauri`, `electron`,
+  `guard`, `seal`, `unplugin`, `telemetry`, and `web-e2e`.
+- `apps/console`: the SvelteKit admin console (in progress).
 - `server-template`: the deployable project embedded by `copylocker init`.
 
 ## Repository model and licensing
