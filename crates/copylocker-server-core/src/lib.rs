@@ -12,7 +12,9 @@
 //! the client fails **open** into its grace window. Merging them into one enum is how outages
 //! turn into mass lockouts (`10-server-worker.md §4`).
 
-#![no_std]
+// The host-only `ts-rs` feature (admin-sdk binding generation) links std because the
+// ts-rs derive emits std-prelude code. Every other build stays no_std + alloc.
+#![cfg_attr(not(feature = "ts-rs"), no_std)]
 #![forbid(unsafe_code)]
 // In tests, unwrap/expect are assertion shorthand. Production code keeps the workspace denies.
 #![cfg_attr(
@@ -23,6 +25,7 @@
 extern crate alloc;
 
 pub mod activate;
+pub mod analytics;
 pub mod anomaly;
 pub mod catalog;
 pub mod deactivate;

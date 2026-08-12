@@ -12,12 +12,16 @@ default = ["std"]
 std = ["copylocker-proto/std", "copylocker-suite/std", "copylocker-types/std"]
 # Serde derives for the catalog and policy documents the CLI and console exchange.
 serde = ["dep:serde", "copylocker-types/serde"]
+# TypeScript binding generation for the admin-sdk drift check
+# (`scripts/check-admin-sdk-bindings.sh`). Host-only; never part of no_std builds.
+ts-rs = ["serde", "dep:ts-rs", "copylocker-types/ts-rs"]
 
 [dependencies]
 copylocker-types = { workspace = true }
 copylocker-suite = { workspace = true }
 copylocker-proto = { workspace = true }
 serde = { workspace = true, features = ["derive", "alloc"], optional = true }
+ts-rs = { workspace = true, optional = true }
 
 [dev-dependencies]
 copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65"] }

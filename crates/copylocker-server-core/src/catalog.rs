@@ -18,6 +18,11 @@ use copylocker_types::LimitValue;
 /// A single atomic capability.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct Feature {
     /// Identifier. Convention is `<domain>.<capability>`, e.g. `export.pdf`.
     ///
@@ -43,6 +48,11 @@ pub struct Feature {
 /// What a group contains.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct GroupMembers {
     /// Other groups included wholesale.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -59,6 +69,11 @@ pub struct GroupMembers {
 /// A named, reusable set of features.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct FeatureGroup {
     /// Group identifier.
     pub id: String,
@@ -71,6 +86,11 @@ pub struct FeatureGroup {
 /// A purchasable tier.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct Tier {
     /// Tier identifier.
     pub id: String,

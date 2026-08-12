@@ -22,6 +22,11 @@ use crate::catalog::{Catalog, CatalogError, MAX_GROUP_DEPTH};
 /// What a grant confers.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 #[cfg_attr(feature = "serde", serde(tag = "kind", rename_all = "snake_case"))]
 pub enum GrantTarget {
     /// A single feature.
@@ -39,6 +44,11 @@ pub enum GrantTarget {
 /// An add-on purchase or manual grant, optionally with its own validity window.
 #[derive(Clone, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct Grant {
     /// What is granted.
     pub target: GrantTarget,
@@ -69,6 +79,11 @@ impl Grant {
 /// How a numeric limit combines when several sources set it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum LimitMergePolicy {
     /// Take the larger value. The default, because an add-on should never shrink a quota
@@ -84,6 +99,11 @@ pub enum LimitMergePolicy {
 /// The input to resolution (`licensing-model.md §2.1`).
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct EntitlementSpec {
     /// Base tier.
     pub tier: String,
