@@ -1,0 +1,21 @@
+[package]
+name = "copylocker-console-e2e-device"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+publish = false
+
+# Standalone workspace: this helper is a Playwright device fixture, not a
+# workspace member. It reuses the workspace crates by path only.
+[workspace]
+
+[dependencies]
+copylocker-client = { path = "../../../crates/copylocker-client" }
+copylocker-fingerprint = { path = "../../../crates/copylocker-fingerprint" }
+copylocker-proto = { path = "../../../crates/copylocker-proto", features = ["std"] }
+copylocker-store = { path = "../../../crates/copylocker-store" }
+copylocker-suite = { path = "../../../crates/copylocker-suite" }
+copylocker-suite-std = { path = "../../../crates/copylocker-suite-std", features = ["std", "pq-ml-dsa-65"] }
+copylocker-types = { path = "../../../crates/copylocker-types", features = ["std"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

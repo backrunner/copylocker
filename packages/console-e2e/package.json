@@ -1,0 +1,18 @@
+{
+  "name": "@copylocker/console-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "description": "Playwright E2E suite for the M7 admin console (apps/console) against the real local Worker backend.",
+  "scripts": {
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "playwright": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^26.1.2",
+    "axe-core": "^4.13.0",
+    "typescript": "7.0.2"
+  }
+}
