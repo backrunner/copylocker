@@ -39,6 +39,10 @@ jobs:
         run: cargo run --locked --quiet -p copylocker-cli -- kat check --file vectors/CL-STD-1/kat.json
       - name: Check architecture boundaries
         run: bash scripts/check-architecture.sh
+      - name: Check legal data-inventory sync
+        run: node scripts/check-legal-sync.mjs
+      - name: Check admin-sdk bindings drift
+        run: bash scripts/check-admin-sdk-bindings.sh
 
   suite-matrix:
     name: ML-DSA-${{ matrix.parameter-set }} conformance
@@ -123,6 +127,115 @@ jobs:
         run: bash scripts/check-wasm-size.sh
       - name: Enforce browser verification budget
         run: node scripts/bench-wasm-verifier.mjs
+
+  web-sdk:
+    name: Web SDK packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            packages/web/package-lock.json
+            packages/react/package-lock.json
+            packages/vue/package-lock.json
+            packages/svelte/package-lock.json
+            packages/guard/package-lock.json
+            packages/seal/package-lock.json
+            packages/unplugin/package-lock.json
+            packages/telemetry/package-lock.json
+            packages/admin-sdk/package-lock.json
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      - name: Enforce Web SDK WASM gzip budget
+        run: bash scripts/check-web-wasm-size.sh
+      - name: Build @copylocker/web types
+        run: npm ci --ignore-scripts && npm run build
+        working-directory: packages/web
+      - name: Test @copylocker/web
+        run: npm run check && npm test
+        working-directory: packages/web
+      - name: Test @copylocker/react
+        run: npm ci --ignore-scripts && npm run check && npm test
+        working-directory: packages/react
+      - name: Test @copylocker/vue
+        run: npm ci --ignore-scripts && npm run check && npm test
+        working-directory: packages/vue
+      - name: Test @copylocker/svelte
+        run: npm ci --ignore-scripts && npm run check && npm test
+        working-directory: packages/svelte
+      - name: Test @copylocker/guard
+        run: npm ci --ignore-scripts && npm run check && npm test
+        working-directory: packages/guard
+      - name: Test @copylocker/seal
+        run: npm ci --ignore-scripts && npm run check && npm test
+        working-directory: packages/seal
+      - name: Test @copylocker/telemetry
+        run: npm ci --ignore-scripts && npm run check && npm test
+        working-directory: packages/telemetry
+      - name: Test @copylocker/admin-sdk
+        run: npm ci --ignore-scripts && npm run check && npm run check:bindings && npm test
+        working-directory: packages/admin-sdk
+      - name: Test @copylocker/unplugin
+        run: npm ci --ignore-scripts && npm rebuild esbuild && npm run check && npm test
+        working-directory: packages/unplugin
+
+  web-e2e:
+    name: Web SDK browser E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: |
+            crates/copylocker-worker/package-lock.json
+            packages/web/package-lock.json
+            packages/guard/package-lock.json
+            packages/seal/package-lock.json
+            packages/unplugin/package-lock.json
+            packages/web-e2e/package-lock.json
+            examples/vite-spa/package-lock.json
+            examples/nextjs-app/package-lock.json
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      - name: Install WASM build tools
+        run: cargo install --locked worker-build@0.8.5 wasm-bindgen-cli@0.2.126
+      - name: Build the CopyLocker CLI
+        run: cargo build --locked -p copylocker-cli
+      - name: Build the Worker bundle
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild workerd
+          npm run build
+        working-directory: crates/copylocker-worker
+      - name: Build @copylocker/web with the real WASM core
+        run: npm ci --ignore-scripts && npm run build:wasm && npm run build
+        working-directory: packages/web
+      - name: Install M4 build-tooling package dependencies
+        # The vite-spa build loads @copylocker/unplugin, and run-e2e.mjs
+        # builds guard/seal/unplugin from source. esbuild's postinstall is
+        # needed by the unplugin bootstrap pre-bundle (same pattern as the
+        # Worker build above).
+        run: |
+          npm ci --ignore-scripts --prefix packages/guard
+          npm ci --ignore-scripts --prefix packages/seal
+          npm ci --ignore-scripts --prefix packages/unplugin
+          npm rebuild esbuild --prefix packages/unplugin
+      - name: Install example dependencies
+        run: |
+          npm ci --ignore-scripts --prefix examples/vite-spa
+          npm ci --ignore-scripts --prefix examples/nextjs-app
+      - name: Install Playwright Chromium
+        run: npm ci --ignore-scripts && npx playwright install --with-deps chromium firefox webkit
+        working-directory: packages/web-e2e
+      - name: Run the browser E2E suite
+        run: npm run test:e2e
+        working-directory: packages/web-e2e
 
   supply-chain:
     name: Supply-chain policy

@@ -1,0 +1,112 @@
+name: Release
+
+# Release engineering for M8: reproducible WASM builds, SBOM, Sigstore keyless signing.
+# Triggered by version tags. Publishing to npm/Cloudflare requires the corresponding secrets and
+# remains an authorized, human-driven step; this workflow produces and signs the evidence.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+  id-token: write # Sigstore keyless OIDC
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -Dwarnings
+
+jobs:
+  reproducible-wasm:
+    name: Reproducible WASM builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.96.0 --profile minimal --target wasm32-unknown-unknown
+      - name: Build Worker WASM twice and compare digests
+        run: |
+          cargo build --locked --profile worker-release --target wasm32-unknown-unknown -p copylocker-worker
+          sha256sum target/wasm32-unknown-unknown/worker-release/copylocker_worker.wasm > /tmp/first.sha
+          touch crates/copylocker-worker/src/lib.rs
+          cargo build --locked --profile worker-release --target wasm32-unknown-unknown -p copylocker-worker
+          sha256sum -c /tmp/first.sha
+      - name: Build Web SDK WASM twice and compare digests
+        run: |
+          cargo build --locked --profile worker-release --target wasm32-unknown-unknown -p copylocker-wasm
+          sha256sum target/wasm32-unknown-unknown/worker-release/copylocker_wasm.wasm > /tmp/first-web.sha
+          touch crates/copylocker-wasm/src/lib.rs
+          cargo build --locked --profile worker-release --target wasm32-unknown-unknown -p copylocker-wasm
+          sha256sum -c /tmp/first-web.sha
+
+  provenance:
+    name: SBOM and Sigstore provenance
+    runs-on: ubuntu-latest
+    needs: reproducible-wasm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Generate SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          format: spdx-json
+          output-file: copylocker-sbom.spdx.json
+      - name: Generate dependency checksums
+        run: |
+          sha256sum Cargo.lock > checksums.txt
+          find crates packages -name package-lock.json -not -path '*/node_modules/*' \
+            -exec sha256sum {} + >> checksums.txt
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign SBOM and checksums (keyless)
+        run: |
+          cosign sign-blob --yes \
+            --bundle copylocker-sbom.spdx.json.sigstore.json \
+            copylocker-sbom.spdx.json
+          cosign sign-blob --yes \
+            --bundle checksums.txt.sigstore.json \
+            checksums.txt
+      - name: Upload provenance artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-provenance
+          path: |
+            copylocker-sbom.spdx.json
+            copylocker-sbom.spdx.json.sigstore.json
+            checksums.txt
+            checksums.txt.sigstore.json
+          retention-days: 90
+
+  npm-provenance:
+    name: npm pack with provenance evidence
+    runs-on: ubuntu-latest
+    needs: reproducible-wasm
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26
+      - name: Pack every publishable package and record digests
+        run: |
+          mkdir -p dist-npm
+          for pkg in packages/tauri packages/electron packages/web packages/react \
+                     packages/vue packages/svelte packages/guard packages/seal \
+                     packages/unplugin packages/telemetry; do
+            if [ -f "$pkg/package.json" ] && ! grep -q '"private": true' "$pkg/package.json"; then
+              (cd "$pkg" && npm ci --ignore-scripts && npm run build --if-present && \
+               npm pack --pack-destination ../../dist-npm)
+            fi
+          done
+          sha256sum dist-npm/*.tgz > dist-npm/SHA256SUMS
+          cat dist-npm/SHA256SUMS
+      - name: Upload npm tarballs
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-tarballs
+          path: dist-npm/
+          retention-days: 90
+
+      # Actual `npm publish --provenance` is intentionally NOT part of CI yet: no package has
+      # been published (see agent.md "Accepted Risks"), and first publication is an authorized
+      # human decision. When approved, publish from these exact tarballs with
+      # `npm publish <tarball> --provenance --access public` so the provenance statement matches
+      # this workflow run.
