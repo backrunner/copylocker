@@ -1,0 +1,120 @@
+{
+  "name": "@copylocker/unplugin",
+  "version": "0.1.0",
+  "description": "CopyLocker build-time integrity plugin — signed integrity manifests, two-round self-reference backfill, guard runtime injection, and asset sealing for Vite/Rollup/esbuild/webpack/rspack/farm.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./vite": {
+      "types": "./dist/vite.d.ts",
+      "import": "./dist/vite.js",
+      "default": "./dist/vite.js"
+    },
+    "./rollup": {
+      "types": "./dist/rollup.d.ts",
+      "import": "./dist/rollup.js",
+      "default": "./dist/rollup.js"
+    },
+    "./esbuild": {
+      "types": "./dist/esbuild.d.ts",
+      "import": "./dist/esbuild.js",
+      "default": "./dist/esbuild.js"
+    },
+    "./webpack": {
+      "types": "./dist/webpack.d.ts",
+      "import": "./dist/webpack.js",
+      "default": "./dist/webpack.js"
+    },
+    "./rspack": {
+      "types": "./dist/rspack.d.ts",
+      "import": "./dist/rspack.js",
+      "default": "./dist/rspack.js"
+    },
+    "./farm": {
+      "types": "./dist/farm.d.ts",
+      "import": "./dist/farm.js",
+      "default": "./dist/farm.js"
+    },
+    "./verify": {
+      "types": "./dist/verify.d.ts",
+      "import": "./dist/verify.js",
+      "default": "./dist/verify.js"
+    }
+  },
+  "bin": {
+    "copylocker-unplugin": "./dist/cli.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:bootstrap": "node scripts/build-bootstrap.mjs",
+    "prebuild": "node scripts/build-bootstrap.mjs",
+    "build": "tsc -p tsconfig.json",
+    "precheck": "node scripts/build-bootstrap.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "pretest": "node scripts/build-bootstrap.mjs",
+    "test": "vitest run",
+    "prepack": "npm run build && npm test"
+  },
+  "dependencies": {
+    "@copylocker/guard": "0.1.0",
+    "@copylocker/seal": "0.1.0",
+    "unplugin": "^3.3.0"
+  },
+  "devDependencies": {
+    "@copylocker/guard": "file:../guard",
+    "@copylocker/seal": "file:../seal",
+    "@farmfe/core": "^1.7.11",
+    "@rspack/core": "^2.1.8",
+    "@types/node": "^26.1.2",
+    "esbuild": "^0.28.1",
+    "rollup": "^4.62.4",
+    "typescript": "7.0.2",
+    "vite": "^8.2.1",
+    "vitest": "4.1.10",
+    "webpack": "^5.109.2"
+  },
+  "peerDependencies": {
+    "@farmfe/core": ">=1",
+    "@rspack/core": ">=1",
+    "esbuild": ">=0.20",
+    "rollup": ">=4",
+    "vite": ">=5",
+    "webpack": ">=5"
+  },
+  "peerDependenciesMeta": {
+    "@farmfe/core": {
+      "optional": true
+    },
+    "@rspack/core": {
+      "optional": true
+    },
+    "esbuild": {
+      "optional": true
+    },
+    "rollup": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
+    },
+    "webpack": {
+      "optional": true
+    }
+  },
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "packages/unplugin"
+  }
+}
