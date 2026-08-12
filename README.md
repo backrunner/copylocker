@@ -10,10 +10,11 @@ the current milestone state and evidence.
 
 ## Documentation
 
-The documentation site source lives in [`docs/`](docs/) (VitePress; `npm install && npm run dev`
-in that directory). It covers the five-minute quickstart, protection-level guide, licensing
-model, Web SDK, deployment, operations runbook, SLOs, and cost estimation. The security policy
-and residual-risk statement are in [SECURITY.md](SECURITY.md).
+The documentation site source lives in [`docs/`](docs/) (a [svedocs](https://github.com/backrunner/svedocs)
+SvelteKit app deployed to Cloudflare Pages; `npm install && npm run dev` in that directory,
+`npm run build` for the edge build). It covers the five-minute quickstart, protection-level
+guide, licensing model, Web SDK, deployment, operations runbook, SLOs, and cost estimation. The
+security policy and residual-risk statement are in [SECURITY.md](SECURITY.md).
 
 ## Workspace
 
