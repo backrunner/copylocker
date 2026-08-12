@@ -1,0 +1,44 @@
+{
+	"name": "@copylocker/console",
+	"private": true,
+	"version": "0.1.0",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite build && wrangler dev",
+		"deploy": "vite build && wrangler deploy",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"build:wasm": "node scripts/build-simulator-wasm.mjs",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"mock": "node scripts/mock-api.mjs"
+	},
+	"devDependencies": {
+		"@cloudflare/workers-types": "^5.20260808.1",
+		"@sveltejs/adapter-cloudflare": "^7.2.9",
+		"@sveltejs/kit": "^2.70.2",
+		"@sveltejs/vite-plugin-svelte": "^7.3.0",
+		"@tailwindcss/vite": "^4.3.3",
+		"@testing-library/svelte": "^5.4.2",
+		"@types/node": "^24.13.3",
+		"@types/qrcode": "^1.5.6",
+		"axe-core": "^4.13.0",
+		"jsdom": "^30.0.1",
+		"svelte": "^5.56.8",
+		"svelte-check": "^4.7.5",
+		"tailwindcss": "^4.3.3",
+		"typescript": "^6.0.3",
+		"vite": "^8.2.1",
+		"vitest": "^4.1.10",
+		"wrangler": "^4.120.0"
+	},
+	"dependencies": {
+		"@lucide/svelte": "^1.30.0",
+		"bits-ui": "^2.18.1",
+		"clsx": "^2.1.1",
+		"mode-watcher": "^1.1.0",
+		"qrcode": "^1.5.4",
+		"tailwind-merge": "^3.6.0"
+	}
+}

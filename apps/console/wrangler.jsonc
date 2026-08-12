@@ -1,0 +1,25 @@
+{
+	// ADR-0010：console 是独立 Worker，只通过 Service Binding 调 API Worker。
+	// 不绑定 D1/DO/KV/R2，不绑定任何签名密钥。
+	"name": "copylocker-admin",
+	"main": ".svelte-kit/cloudflare/_worker.js",
+	"compatibility_date": "2026-07-01",
+	"assets": {
+		"directory": ".svelte-kit/cloudflare",
+		"binding": "ASSETS"
+	},
+	"services": [
+		{
+			"binding": "API",
+			"service": "copylocker"
+		}
+	],
+	"observability": {
+		"enabled": true
+	},
+	"vars": {
+		// 生产环境设为 "true" 后，非公开路由必须携带 Cloudflare Access JWT。
+		// 完整 JWKS 验签属部署期配置（见 README 与 src/hooks.server.ts 的 TODO）。
+		"ACCESS_ENFORCE": "false"
+	}
+}
