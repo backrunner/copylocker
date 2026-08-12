@@ -1,0 +1,29 @@
+{
+  "name": "copylocker-vite-spa-example",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173",
+    "seal-asset": "node scripts/seal-asset.mjs",
+    "copy-wasm": "node scripts/copy-wasm.mjs",
+    "ensure-build-keys": "node scripts/ensure-build-keys.mjs",
+    "predev": "node scripts/copy-wasm.mjs",
+    "prebuild": "node scripts/copy-wasm.mjs && node scripts/ensure-build-keys.mjs",
+    "prepreview": "node scripts/copy-wasm.mjs"
+  },
+  "dependencies": {
+    "@copylocker/web": "file:../../packages/web"
+  },
+  "devDependencies": {
+    "@copylocker/guard": "file:../../packages/guard",
+    "@copylocker/seal": "file:../../packages/seal",
+    "@copylocker/unplugin": "file:../../packages/unplugin",
+    "@types/node": "^26.1.2",
+    "typescript": "7.0.2",
+    "vite": "7.3.6"
+  }
+}

@@ -1,0 +1,161 @@
+:root {
+  color-scheme: light;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  line-height: 1.45;
+}
+
+body {
+  margin: 0;
+  background: #f6f7f9;
+  color: #1c2330;
+}
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1.25rem;
+  background: #fff;
+  border-bottom: 1px solid #e2e5ea;
+}
+
+.brand {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+
+.brand span {
+  display: block;
+  font-size: 0.8rem;
+  color: #5b6472;
+}
+
+.state-line {
+  display: flex;
+  gap: 0.45rem;
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.advisory-tag {
+  font-size: 0.7rem;
+  font-style: normal;
+  color: #8a5a00;
+  background: #fff3d6;
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+}
+
+.state-dot {
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: #9aa3af;
+}
+
+.state-dot[data-state='active'] {
+  background: #1a9e54;
+}
+
+.state-dot[data-state='locked'],
+.state-dot[data-state='revoked'],
+.state-dot[data-state='tampered'] {
+  background: #c93030;
+}
+
+main {
+  max-width: 52rem;
+  margin: 1.5rem auto;
+  padding: 0 1rem;
+  display: grid;
+  gap: 1rem;
+}
+
+.panel {
+  background: #fff;
+  border: 1px solid #e2e5ea;
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+}
+
+.panel h1,
+.panel h2 {
+  margin-top: 0;
+}
+
+.meta {
+  color: #5b6472;
+  font-size: 0.85rem;
+}
+
+.row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.row label {
+  display: block;
+  width: 100%;
+  font-size: 0.85rem;
+  color: #5b6472;
+}
+
+input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #c8cdd5;
+  border-radius: 6px;
+  min-width: 16rem;
+  font: inherit;
+}
+
+button {
+  padding: 0.45rem 0.9rem;
+  border: 1px solid #1c4ed8;
+  border-radius: 6px;
+  background: #1c4ed8;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.quiet {
+  background: transparent;
+  color: #1c4ed8;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.output {
+  background: #101623;
+  color: #c7f0d2;
+  border-radius: 6px;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 2.4rem;
+}
+
+.output[data-kind='error'] {
+  color: #f3b3b3;
+}
+
+.log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.8rem;
+  max-height: 12rem;
+  overflow-y: auto;
+}
+
+.log li {
+  padding: 0.15rem 0;
+  border-bottom: 1px dashed #e2e5ea;
+}

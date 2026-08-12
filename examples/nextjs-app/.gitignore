@@ -1,0 +1,2 @@
+# TypeScript incremental build info (tsconfig has "incremental": true)
+*.tsbuildinfo
