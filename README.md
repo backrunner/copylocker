@@ -1,10 +1,12 @@
 # CopyLocker
 
 CopyLocker is a Rust licensing protocol, policy engine, administration CLI, Cloudflare Worker
-runtime, and client SDK family. The workspace implements the M0–M2 baseline (protocol and
-cryptography, server core, desktop SDKs), the M3 Web SDK (WASM core, `@copylocker/web`, framework
-bindings, browser E2E), and the M4 build toolchain (`@copylocker/unplugin`, `@copylocker/guard`,
-`@copylocker/seal`). See `agent.md` for the current milestone state and evidence.
+runtime, and client SDK family. The workspace covers the protocol and cryptography, the server
+core, the desktop SDKs, the Web SDK (WASM core, `@copylocker/web`, framework bindings, browser
+E2E), the build toolchain (`@copylocker/unplugin`, `@copylocker/guard`, `@copylocker/seal`), the
+release registry and offline activation loop, Mode E accounts, privacy-preserving telemetry and
+analytics with DSR surfaces, the admin SDK, and the SvelteKit admin console. See `agent.md` for
+the current milestone state and evidence.
 
 ## Documentation
 
@@ -26,7 +28,7 @@ and residual-risk statement are in [SECURITY.md](SECURITY.md).
 - `crates/copylocker-wasm`: the browser WASM core with the opaque `step()` interface.
 - `packages/`: TypeScript packages — `web`, `react`, `vue`, `svelte`, `tauri`, `electron`,
   `guard`, `seal`, `unplugin`, `telemetry`, and `web-e2e`.
-- `apps/console`: the SvelteKit admin console (in progress).
+- `apps/console`: the SvelteKit admin console.
 - `server-template`: the deployable project embedded by `copylocker init`.
 
 ## Repository model and licensing
@@ -45,7 +47,7 @@ proprietary code requires a separate commercial license, process/service isolati
 review confirming compliance with the GPL. See
 [the open/closed boundary](.agents/00-overview/open-closed-boundary.md) for the engineering rules.
 
-## M1 quick start
+## Quick start
 
 Install the CLI from this checkout:
 
@@ -136,5 +138,6 @@ npm run size
 npm run startup
 ```
 
-Release, machine mutation CLI commands, analytics/audit/DSR APIs, Admin token lifecycle APIs, and a
-web console remain post-M1 work. They are not part of the current operational contract.
+The release registry, machine mutation CLI commands, analytics/audit/DSR APIs, Admin token
+lifecycle APIs, and the web console are part of the current operational contract; the release
+lifecycle, analytics, audit, and DSR guides in [`docs/`](docs/) describe them.

@@ -91,6 +91,23 @@ Every Admin mutation requires an explicit, stable, unique idempotency key
 and need `--confirm`. Epoch revocation additionally needs two distinct Admin actors within
 15 minutes. These are server-enforced contracts, not CLI politeness.
 
+## The admin console
+
+The console (`apps/console`) is a separate SvelteKit app deployed to Cloudflare
+(`npm run build && wrangler deploy` in that directory). It is an untrusted frontend: real
+authorization always happens in the API Worker (Bearer token + scope checks). The console's
+own route guard relies on Cloudflare Access:
+
+- **`ACCESS_ENFORCE=true` only checks the *presence* of the `Cf-Access-Jwt-Assertion`
+  header.** Full JWKS signature verification against
+  `https://<team>.cloudflareaccess.com/cdn-cgi/access/certs` (validating `exp`/`aud` with
+  `CF_ACCESS_TEAM_DOMAIN` / `CF_ACCESS_AUD`) is deployment-time configuration — see the
+  `TODO(deployment)` note in `apps/console/src/hooks.server.ts`. **Complete this before any
+  production deployment**; presence checking alone is not an authorization boundary.
+- `/offline` and `/offline-api` are public routes (the offline activation portal) and never
+  share the admin authentication path. The Admin token lives only in `sessionStorage` and is
+  proxied via `/admin-api`; it never enters URLs or logs.
+
 ## Gradual rollout
 
 Worker deployments support percentage-based gradual rollout and fast rollback via Cloudflare
