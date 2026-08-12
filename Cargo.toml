@@ -28,8 +28,8 @@ version = "0.1.0"
 edition = "2021"
 rust-version = "1.85"
 license = "GPL-3.0-only"
-repository = "https://github.com/copylocker/copylocker"
-homepage = "https://copylocker.dev"
+repository = "https://github.com/backrunner/copylocker"
+homepage = "https://github.com/backrunner/copylocker"
 
 # Unified version across all crates and npm packages (00-crate-layout.md §6).
 [workspace.dependencies]
