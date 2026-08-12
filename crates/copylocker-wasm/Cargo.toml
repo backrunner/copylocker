@@ -1,0 +1,36 @@
+[package]
+name = "copylocker-wasm"
+description = "Browser WASM core for the CopyLocker web SDK (40-web-sdk-wasm-ts.md)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# cdylib produces the .wasm artifact; rlib lets host-side unit/integration tests link the
+# platform-independent session core directly.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+copylocker-core = { workspace = true }
+copylocker-proto = { workspace = true }
+copylocker-suite = { workspace = true }
+copylocker-suite-std = { workspace = true, features = ["pq-ml-dsa-65"] }
+copylocker-types = { workspace = true }
+getrandom = { workspace = true }
+zeroize = { workspace = true, features = ["alloc"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# getrandom 0.3 needs its explicit WebCrypto backend on wasm32-unknown-unknown.
+getrandom = { workspace = true, features = ["wasm_js"] }
+wasm-bindgen = { workspace = true }
+
+[dev-dependencies]
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65", "deterministic-rng"] }
+rand_chacha = { workspace = true }
+rand_core = { workspace = true }
+
+[lints]
+workspace = true
