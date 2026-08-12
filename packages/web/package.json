@@ -1,0 +1,41 @@
+{
+  "name": "@copylocker/web",
+  "version": "0.1.0",
+  "description": "CopyLocker Web SDK — TypeScript shell over the copylocker-wasm licensing core.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./ssr": {
+      "types": "./dist/ssr.d.ts",
+      "import": "./dist/ssr.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "build": "tsc -p tsconfig.json && node scripts/copy-wasm.mjs",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build:wasm && npm run build && npm test"
+  },
+  "devDependencies": {
+    "fake-indexeddb": "6.2.5",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "packages/web"
+  }
+}
