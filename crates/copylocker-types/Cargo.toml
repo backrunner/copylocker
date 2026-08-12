@@ -11,10 +11,14 @@ repository.workspace = true
 default = ["std"]
 std = []
 serde = ["dep:serde"]
+# TypeScript binding generation for the admin-sdk drift check
+# (`scripts/check-admin-sdk-bindings.sh`). Host-only; never part of no_std builds.
+ts-rs = ["serde", "dep:ts-rs"]
 
 [dependencies]
 serde = { workspace = true, features = ["derive", "alloc"], optional = true }
 zeroize = { workspace = true, features = ["alloc", "derive"] }
+ts-rs = { workspace = true, optional = true }
 
 [lints]
 workspace = true

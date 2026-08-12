@@ -369,6 +369,10 @@ impl ValidateRequest {
 
 artifact_like!(ValidateRequest, ArtifactKind::ValidateRequest);
 
+/// Maximum canonical-CBOR byte length of a telemetry block (`90-analytics-telemetry.md §2.6`:
+/// blocks over 512 bytes are dropped, not truncated).
+pub const MAX_TELEMETRY_BLOCK_BYTES: usize = 512;
+
 /// User-consented telemetry piggybacked on validation (`90-analytics-telemetry.md §6`).
 ///
 /// The server treats every value as untrusted and clips it before projection. Keeping the block
@@ -390,6 +394,27 @@ pub struct TelemetryBlock {
 }
 
 impl TelemetryBlock {
+    /// Encode to canonical bytes.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        self.to_value().to_canonical()
+    }
+
+    /// Decode from canonical bytes, applying client-facing limits and the block size cap.
+    ///
+    /// The block travels to clients that embed it into a signed `ValidateRequest` (proto
+    /// key 11), so this is the bounded entry point for host-produced bytes.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtoError> {
+        if bytes.len() > MAX_TELEMETRY_BLOCK_BYTES {
+            return Err(ProtoError::Codec(CodecError::TooLong));
+        }
+        let v = decode_canonical(bytes, CLIENT_LIMITS)?;
+        if v.as_map().is_none() {
+            return Err(ProtoError::Codec(CodecError::Malformed));
+        }
+        Self::from_value(&v)
+    }
+
     fn to_value(&self) -> CborValue {
         let mut b = MapBuilder::new();
         b.put(0, CborValue::Uint(self.consent_version));
@@ -458,6 +483,230 @@ impl TelemetryBlock {
             days_active: field::uint(v, 5)?,
         })
     }
+}
+
+/// Account message schema implemented by this release.
+pub const ACCOUNT_SCHEMA_V1: u64 = 1;
+/// Byte length of an account access or refresh token.
+pub const ACCOUNT_TOKEN_LEN: usize = 32;
+/// Maximum account email length.
+pub const MAX_ACCOUNT_EMAIL_BYTES: usize = 254;
+/// Maximum accepted password length. Longer inputs are rejected rather than truncated so a
+/// client never silently authenticates with a different password than the user typed.
+pub const MAX_ACCOUNT_PASSWORD_BYTES: usize = 1024;
+
+/// `POST /v1/account/login` (Mode E, `protocol-spec.md §10.2`).
+///
+/// Carries the account password, so it is only ever sent over TLS to the account endpoint and
+/// is never logged, journaled, or echoed back.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AccountLoginRequest {
+    /// Account message schema.
+    pub schema: u64,
+    /// Product the account belongs to.
+    pub product_id: String,
+    /// Account email, compared case-insensitively.
+    pub email: String,
+    /// Account password. Verified against the stored Argon2id hash and then dropped.
+    pub password: String,
+}
+
+impl AccountLoginRequest {
+    /// Construct a schema-v1 request after validation.
+    pub fn new(
+        product_id: impl Into<String>,
+        email: impl Into<String>,
+        password: impl Into<String>,
+    ) -> Result<Self, ProtoError> {
+        let value = Self {
+            schema: ACCOUNT_SCHEMA_V1,
+            product_id: product_id.into(),
+            email: email.into(),
+            password: password.into(),
+        };
+        value.validate()?;
+        Ok(value)
+    }
+
+    /// Encode as canonical CBOR.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        let mut builder = MapBuilder::new();
+        builder.put(0, CborValue::Uint(self.schema));
+        builder.put(1, CborValue::Text(self.product_id.clone()));
+        builder.put(2, CborValue::Text(self.email.clone()));
+        builder.put(3, CborValue::Text(self.password.clone()));
+        builder.finish()
+    }
+
+    /// Decode a bounded, canonical request.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtoError> {
+        if bytes.len() > copylocker_types::MAX_BODY_BYTES {
+            return Err(ProtoError::Codec(CodecError::TooLong));
+        }
+        let value = decode_canonical(bytes, CLIENT_LIMITS)?;
+        if value.as_map().is_none_or(|entries| entries.len() != 4) {
+            return Err(ProtoError::Codec(CodecError::Malformed));
+        }
+        let request = Self {
+            schema: field::uint(&value, 0)?,
+            product_id: field::text(&value, 1)?,
+            email: field::text(&value, 2)?,
+            password: field::text(&value, 3)?,
+        };
+        request.validate()?;
+        Ok(request)
+    }
+
+    fn validate(&self) -> Result<(), ProtoError> {
+        if self.schema != ACCOUNT_SCHEMA_V1
+            || !is_product_slug(&self.product_id)
+            || !is_account_email(&self.email)
+            || self.password.is_empty()
+            || self.password.len() > MAX_ACCOUNT_PASSWORD_BYTES
+            || self.password.as_bytes().contains(&0)
+        {
+            return Err(ProtoError::Codec(CodecError::Malformed));
+        }
+        Ok(())
+    }
+}
+
+impl core::fmt::Debug for AccountLoginRequest {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("AccountLoginRequest")
+            .field("schema", &self.schema)
+            .field("product_id", &self.product_id)
+            .field("email", &self.email)
+            .field("password", &"<redacted>")
+            .finish()
+    }
+}
+
+/// `POST /v1/account/refresh`: exchange a refresh token for a fresh session.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AccountRefreshRequest {
+    /// Account message schema.
+    pub schema: u64,
+    /// Refresh token issued by login or a previous refresh.
+    pub refresh_token: [u8; ACCOUNT_TOKEN_LEN],
+}
+
+impl AccountRefreshRequest {
+    /// Construct a schema-v1 request.
+    #[must_use]
+    pub fn new(refresh_token: [u8; ACCOUNT_TOKEN_LEN]) -> Self {
+        Self {
+            schema: ACCOUNT_SCHEMA_V1,
+            refresh_token,
+        }
+    }
+
+    /// Encode as canonical CBOR.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        let mut builder = MapBuilder::new();
+        builder.put(0, CborValue::Uint(self.schema));
+        builder.put(1, CborValue::Bytes(self.refresh_token.to_vec()));
+        builder.finish()
+    }
+
+    /// Decode a bounded, canonical request.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtoError> {
+        account_token_request(bytes).map(|refresh_token| Self {
+            schema: ACCOUNT_SCHEMA_V1,
+            refresh_token,
+        })
+    }
+}
+
+impl core::fmt::Debug for AccountRefreshRequest {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("AccountRefreshRequest")
+            .field("schema", &self.schema)
+            .field("refresh_token", &"<redacted>")
+            .finish()
+    }
+}
+
+/// `POST /v1/account/logout`: revoke one session. Idempotent by design.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AccountLogoutRequest {
+    /// Account message schema.
+    pub schema: u64,
+    /// Refresh token identifying the session to revoke.
+    pub refresh_token: [u8; ACCOUNT_TOKEN_LEN],
+}
+
+impl AccountLogoutRequest {
+    /// Construct a schema-v1 request.
+    #[must_use]
+    pub fn new(refresh_token: [u8; ACCOUNT_TOKEN_LEN]) -> Self {
+        Self {
+            schema: ACCOUNT_SCHEMA_V1,
+            refresh_token,
+        }
+    }
+
+    /// Encode as canonical CBOR.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        let mut builder = MapBuilder::new();
+        builder.put(0, CborValue::Uint(self.schema));
+        builder.put(1, CborValue::Bytes(self.refresh_token.to_vec()));
+        builder.finish()
+    }
+
+    /// Decode a bounded, canonical request.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtoError> {
+        account_token_request(bytes).map(|refresh_token| Self {
+            schema: ACCOUNT_SCHEMA_V1,
+            refresh_token,
+        })
+    }
+}
+
+impl core::fmt::Debug for AccountLogoutRequest {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("AccountLogoutRequest")
+            .field("schema", &self.schema)
+            .field("refresh_token", &"<redacted>")
+            .finish()
+    }
+}
+
+fn account_token_request(bytes: &[u8]) -> Result<[u8; ACCOUNT_TOKEN_LEN], ProtoError> {
+    if bytes.len() > copylocker_types::MAX_BODY_BYTES {
+        return Err(ProtoError::Codec(CodecError::TooLong));
+    }
+    let value = decode_canonical(bytes, CLIENT_LIMITS)?;
+    if value.as_map().is_none_or(|entries| entries.len() != 2) {
+        return Err(ProtoError::Codec(CodecError::Malformed));
+    }
+    if field::uint(&value, 0)? != ACCOUNT_SCHEMA_V1 {
+        return Err(ProtoError::Codec(CodecError::Malformed));
+    }
+    field::fixed::<ACCOUNT_TOKEN_LEN>(&value, 1)
+}
+
+fn is_product_slug(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+}
+
+fn is_account_email(value: &str) -> bool {
+    value.len() >= 3
+        && value.len() <= MAX_ACCOUNT_EMAIL_BYTES
+        && value.bytes().any(|byte| byte == b'@')
+        && !value
+            .bytes()
+            .any(|byte| byte.is_ascii_control() || byte == b' ' || byte == 0)
 }
 
 /// `POST /v1/heartbeat`.
@@ -905,6 +1154,70 @@ mod tests {
     }
 
     #[test]
+    fn telemetry_block_encode_decode_round_trip() {
+        let block = telemetry();
+        let encoded = block.encode();
+        assert!(
+            encoded.len() <= MAX_TELEMETRY_BLOCK_BYTES,
+            "the fixture must fit the design cap"
+        );
+        assert_eq!(TelemetryBlock::decode(&encoded).unwrap(), block);
+        // The default (all-zero) block round-trips too.
+        assert_eq!(
+            TelemetryBlock::decode(&TelemetryBlock::default().encode()).unwrap(),
+            TelemetryBlock::default()
+        );
+    }
+
+    #[test]
+    fn telemetry_block_decode_rejects_malformed_input() {
+        // Not CBOR, not canonical, and not a map.
+        assert!(TelemetryBlock::decode(&[0xff]).is_err());
+        assert!(TelemetryBlock::decode(&[0xbf, 0x00, 0x00, 0xff]).is_err());
+        assert!(TelemetryBlock::decode(&[0x01]).is_err());
+        // Oversized input is rejected before parsing.
+        assert!(TelemetryBlock::decode(&vec![0u8; MAX_TELEMETRY_BLOCK_BYTES + 1]).is_err());
+        // A valid map with the wrong field shapes.
+        let mut b = MapBuilder::new();
+        b.put(0, CborValue::Uint(1));
+        b.put(1, CborValue::Uint(2));
+        b.put(2, CborValue::Uint(3));
+        b.put(3, CborValue::Array(vec![CborValue::Uint(1)]));
+        b.put(4, CborValue::Map(vec![]));
+        b.put(5, CborValue::Uint(1));
+        assert!(
+            TelemetryBlock::decode(&b.finish()).is_err(),
+            "short histogram"
+        );
+        // Duplicate feature keys are malformed.
+        let mut hits = MapBuilder::new();
+        hits.put(0, CborValue::Uint(1));
+        hits.put(1, CborValue::Uint(2));
+        hits.put(2, CborValue::Uint(3));
+        hits.put(
+            3,
+            CborValue::Array(vec![
+                CborValue::Uint(1),
+                CborValue::Uint(0),
+                CborValue::Uint(0),
+                CborValue::Uint(0),
+            ]),
+        );
+        hits.put(
+            4,
+            CborValue::Map(vec![
+                (CborValue::Text("f".to_string()), CborValue::Uint(1)),
+                (CborValue::Text("f".to_string()), CborValue::Uint(2)),
+            ]),
+        );
+        hits.put(5, CborValue::Uint(1));
+        assert!(
+            TelemetryBlock::decode(&hits.finish()).is_err(),
+            "duplicate feature"
+        );
+    }
+
+    #[test]
     fn activation_proof_binds_both_device_keys_and_the_credential() {
         let base = activation_request();
         let original = base.proof_input();
@@ -1043,5 +1356,62 @@ mod tests {
             decode_attrs(&v),
             Err(ProtoError::Codec(CodecError::UnknownDiscriminant))
         );
+    }
+
+    #[test]
+    fn account_requests_round_trip_and_stay_bounded() {
+        let login = AccountLoginRequest::new("acme", "user@example.test", "correct horse")
+            .expect("valid login request");
+        assert_eq!(AccountLoginRequest::decode(&login.encode()).unwrap(), login);
+
+        let refresh = AccountRefreshRequest::new([7; ACCOUNT_TOKEN_LEN]);
+        assert_eq!(
+            AccountRefreshRequest::decode(&refresh.encode()).unwrap(),
+            refresh
+        );
+
+        let logout = AccountLogoutRequest::new([9; ACCOUNT_TOKEN_LEN]);
+        assert_eq!(
+            AccountLogoutRequest::decode(&logout.encode()).unwrap(),
+            logout
+        );
+    }
+
+    #[test]
+    fn account_requests_reject_invalid_shapes() {
+        assert!(AccountLoginRequest::new("acme", "not-an-email", "password").is_err());
+        assert!(AccountLoginRequest::new("acme", "user@example.test", "").is_err());
+        assert!(AccountLoginRequest::new("", "user@example.test", "password").is_err());
+        assert!(AccountLoginRequest::new("acme", "user@example.test", "x".repeat(1025)).is_err());
+
+        let extended = {
+            let mut builder = MapBuilder::new();
+            builder.put(0, CborValue::Uint(ACCOUNT_SCHEMA_V1));
+            builder.put(1, CborValue::Bytes(vec![1; ACCOUNT_TOKEN_LEN]));
+            builder.put(2, CborValue::Uint(0));
+            builder.finish()
+        };
+        assert!(AccountRefreshRequest::decode(&extended).is_err());
+        assert!(AccountLogoutRequest::decode(&extended).is_err());
+
+        let mut short_token = MapBuilder::new();
+        short_token.put(0, CborValue::Uint(ACCOUNT_SCHEMA_V1));
+        short_token.put(1, CborValue::Bytes(vec![1; 8]));
+        assert!(AccountRefreshRequest::decode(&short_token.finish()).is_err());
+    }
+
+    #[test]
+    fn account_debug_never_renders_secrets() {
+        let login = AccountLoginRequest::new("acme", "user@example.test", "hunter2hunter2")
+            .expect("valid login request");
+        let rendered = alloc::format!("{login:?}");
+        assert!(!rendered.contains("hunter2hunter2"));
+        assert!(rendered.contains("<redacted>"));
+
+        let session_secret_rendered = alloc::format!(
+            "{:?}",
+            AccountRefreshRequest::new([0x41; ACCOUNT_TOKEN_LEN])
+        );
+        assert!(!session_secret_rendered.contains("65"));
     }
 }

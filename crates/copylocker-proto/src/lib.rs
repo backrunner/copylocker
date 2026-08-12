@@ -30,6 +30,7 @@ pub mod error;
 pub(crate) mod field;
 pub mod keywrap;
 pub mod license_key;
+pub mod offline_armor;
 pub mod offline_bundle;
 pub mod requests;
 pub mod responses;
@@ -47,15 +48,20 @@ pub use challenge::{
 pub use envelope::Envelope;
 pub use error::ProtoError;
 pub use license_key::LicenseKey;
+pub use offline_armor::{
+    armor_activation_request, unarmor_activation_request, AR_ARMOR_PREFIX, MAX_AR_ARMORED_BYTES,
+};
 pub use offline_bundle::{
     olk_binding_fingerprint, OfflineLicenseBundle, MAX_OLK_BUNDLE_BYTES, OLK_BUNDLE_SCHEMA_V1,
     UNBOUND_OLK_BINDING_LABEL,
 };
 pub use requests::{
-    ActivationRequest, ClientInfo, Credential, DeactivateRequest, HeartbeatRequest, TelemetryBlock,
-    ValidateRequest,
+    AccountLoginRequest, AccountLogoutRequest, AccountRefreshRequest, ActivationRequest,
+    ClientInfo, Credential, DeactivateRequest, HeartbeatRequest, TelemetryBlock, ValidateRequest,
+    ACCOUNT_SCHEMA_V1, ACCOUNT_TOKEN_LEN, MAX_ACCOUNT_EMAIL_BYTES, MAX_ACCOUNT_PASSWORD_BYTES,
+    MAX_TELEMETRY_BLOCK_BYTES,
 };
-pub use responses::{AckResponse, Keyset, ProtocolErrorResponse};
+pub use responses::{AccountSession, AckResponse, Keyset, ProtocolErrorResponse};
 pub use sealed_asset::{SealedAsset, MAX_SEALED_ASSET_BYTES, SEALED_ASSET_SCHEMA_V1};
 
 use copylocker_suite::cbor::Limits;

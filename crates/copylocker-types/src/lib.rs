@@ -8,7 +8,9 @@
 //! the whole codebase shares one inclusive/exclusive boundary convention
 //! (`crypto-architecture.md §8`, "time comparison with `>` instead of `>=`" pitfall).
 
-#![no_std]
+// The host-only `ts-rs` feature (admin-sdk binding generation) links std because the
+// ts-rs derive emits std-prelude code. Every other build stays no_std + alloc.
+#![cfg_attr(not(feature = "ts-rs"), no_std)]
 #![forbid(unsafe_code)]
 
 extern crate alloc;
