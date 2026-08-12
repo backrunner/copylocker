@@ -49,6 +49,14 @@ const MIGRATIONS: &[(&str, &[u8])] = &[
         "migrations/0008_epoch_approvals.sql",
         include_bytes!("../../../server-template/migrations/0008_epoch_approvals.sql"),
     ),
+    (
+        "migrations/0009_integrity_signer_keys.sql",
+        include_bytes!("../../../server-template/migrations/0009_integrity_signer_keys.sql"),
+    ),
+    (
+        "migrations/0010_release_admin.sql",
+        include_bytes!("../../../server-template/migrations/0010_release_admin.sql"),
+    ),
 ];
 
 #[derive(Debug, Args)]

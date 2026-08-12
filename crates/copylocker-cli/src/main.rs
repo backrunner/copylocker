@@ -4,11 +4,15 @@
 #![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
 
 mod admin_cli;
+mod asset_kek;
 mod bootstrap;
 mod catalog_cli;
+mod dsr_cli;
 mod inspect;
 mod keys;
+mod offline;
 mod project;
+mod release;
 mod remote;
 
 use std::ffi::OsString;
@@ -65,10 +69,20 @@ enum Command {
     Policy(PolicyArgs),
     /// Issue and administer licenses through the remote Admin API.
     License(admin_cli::LicenseArgs),
+    /// Register, list, and delete per-release asset KEKs through the Admin API.
+    AssetKek(asset_kek::AssetKekArgs),
+    /// Register releases and drive version-level deprecation and compromise.
+    Release(release::ReleaseArgs),
     /// Upload, inspect, rotate, and revoke signing epochs.
     Epoch(admin_cli::EpochArgs),
+    /// Export and erase personal data held about a machine or license.
+    Dsr(dsr_cli::DsrArgs),
+    /// Manage telemetry retention through the Admin API.
+    Telemetry(dsr_cli::TelemetryArgs),
     /// Decode a canonical CBOR artifact or signed envelope without trusting it.
     Inspect(inspect::InspectArgs),
+    /// Air-gapped activation requests, OLK issuance, and QR transfer.
+    Offline(offline::OfflineArgs),
     /// Send a narrow authenticated request to the configured Admin API.
     Request(remote::RequestArgs),
 }
@@ -304,8 +318,13 @@ fn run(cli: &Cli) -> Result<Output, CliError> {
             PolicyCommand::Update(args) => admin_cli::policy_update(args),
         },
         Command::License(args) => admin_cli::run_license(args),
+        Command::AssetKek(args) => asset_kek::run(args),
+        Command::Release(args) => release::run(args),
         Command::Epoch(args) => admin_cli::run_epoch(args),
+        Command::Dsr(args) => dsr_cli::run_dsr(args),
+        Command::Telemetry(args) => dsr_cli::run_telemetry(args),
         Command::Inspect(args) => inspect::run(args),
+        Command::Offline(args) => offline::run(args),
         Command::Request(args) => remote::run_request(args),
     }
 }
