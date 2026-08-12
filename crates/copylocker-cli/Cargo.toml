@@ -23,6 +23,7 @@ copylocker-types = { workspace = true }
 getrandom = { workspace = true }
 hex = { workspace = true, features = ["alloc"] }
 hmac = { workspace = true }
+qrcode = { workspace = true }
 rand_chacha = { workspace = true }
 rand_core = { workspace = true }
 reqwest = { workspace = true }

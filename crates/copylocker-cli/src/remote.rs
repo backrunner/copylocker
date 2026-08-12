@@ -175,6 +175,15 @@ impl AdminClient {
         self.send(Method::PATCH, path, &[], Some(body), Some(idempotency_key))
     }
 
+    pub(crate) fn delete(
+        &self,
+        path: &str,
+        query: &[(&str, String)],
+        idempotency_key: Option<&str>,
+    ) -> Result<ApiResponse, CliError> {
+        self.send(Method::DELETE, path, query, None, idempotency_key)
+    }
+
     fn send(
         &self,
         method: Method,
@@ -292,6 +301,13 @@ pub(crate) fn run_request(args: &RequestArgs) -> Result<Output, CliError> {
             Ok(output("request.get", response))
         }
     }
+}
+
+pub(crate) fn output_result(
+    command: &str,
+    response: Result<ApiResponse, CliError>,
+) -> Result<Output, CliError> {
+    response.map(|response| output(command, response))
 }
 
 pub(crate) fn output(command: &str, mut response: ApiResponse) -> Output {
