@@ -45,7 +45,9 @@ function download(bytes: Uint8Array, filename: string): void {
   anchor.href = url
   anchor.download = filename
   anchor.click()
-  URL.revokeObjectURL(url)
+  // Revoke on a later turn: revoking synchronously can race the download
+  // start in some webviews and cancel it.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 document.querySelectorAll<HTMLButtonElement>('.tab').forEach((tab) => {
