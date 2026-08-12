@@ -1,0 +1,42 @@
+{
+  "name": "@copylocker/vue",
+  "version": "0.1.0",
+  "description": "Vue 3 bindings for @copylocker/web — createCopyLocker() plugin and useCopyLocker() composable.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build && npm test"
+  },
+  "peerDependencies": {
+    "@copylocker/web": "0.1.0",
+    "vue": ">=3"
+  },
+  "devDependencies": {
+    "@copylocker/web": "file:../web",
+    "jsdom": "30.0.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10",
+    "vue": "3.5.41"
+  },
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "packages/vue"
+  }
+}

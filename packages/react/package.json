@@ -1,0 +1,46 @@
+{
+  "name": "@copylocker/react",
+  "version": "0.1.0",
+  "description": "React bindings for @copylocker/web — CopyLockerProvider and useCopyLocker().",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build && npm test"
+  },
+  "peerDependencies": {
+    "@copylocker/web": "0.1.0",
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@copylocker/web": "file:../web",
+    "@testing-library/react": "14.3.1",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "jsdom": "30.0.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "packages/react"
+  }
+}
