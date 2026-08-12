@@ -1,0 +1,20 @@
+{
+  "name": "@copylocker/web-e2e",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "description": "Playwright E2E suite for the M3 Web SDK (examples/vite-spa + examples/nextjs-app, optional real Worker backend).",
+  "scripts": {
+    "test:e2e": "node scripts/run-e2e.mjs",
+    "test:e2e:no-backend": "CL_E2E_BACKEND=0 node scripts/run-e2e.mjs",
+    "backend:up": "node scripts/backend-up.mjs --serve",
+    "backend:down": "node scripts/backend-up.mjs --stop",
+    "playwright": "playwright test"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^26.1.2",
+    "typescript": "7.0.2"
+  }
+}

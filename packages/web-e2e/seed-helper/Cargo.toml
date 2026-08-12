@@ -1,0 +1,16 @@
+[package]
+name = "copylocker-web-e2e-seed"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-3.0-only"
+publish = false
+
+# Standalone workspace: this helper is a Playwright fixture generator, not a
+# workspace member. It reuses the workspace crates by path only.
+[workspace]
+
+[dependencies]
+copylocker-suite = { path = "../../../crates/copylocker-suite" }
+copylocker-suite-std = { path = "../../../crates/copylocker-suite-std" }
+getrandom = "0.3"
