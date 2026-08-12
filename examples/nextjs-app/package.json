@@ -1,0 +1,34 @@
+{
+  "name": "copylocker-nextjs-example",
+  "version": "0.1.0",
+  "private": true,
+  "license": "GPL-3.0-only",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build --webpack",
+    "build:turbopack": "next build",
+    "start": "next start --port 3000",
+    "seal-asset": "node scripts/seal-asset.mjs",
+    "copy-wasm": "node scripts/copy-wasm.mjs",
+    "ensure-build-keys": "node scripts/ensure-build-keys.mjs",
+    "predev": "node scripts/copy-wasm.mjs",
+    "prebuild": "node scripts/copy-wasm.mjs && node scripts/ensure-build-keys.mjs",
+    "prestart": "node scripts/copy-wasm.mjs"
+  },
+  "dependencies": {
+    "@copylocker/web": "file:../../packages/web",
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@copylocker/guard": "file:../../packages/guard",
+    "@copylocker/seal": "file:../../packages/seal",
+    "@copylocker/unplugin": "file:../../packages/unplugin",
+    "@types/node": "26.1.2",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
+    "typescript": "7.0.2"
+  }
+}

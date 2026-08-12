@@ -1,0 +1,5 @@
+{
+  "tier": "pro",
+  "note": "Sealed at build time by @copylocker/unplugin seal.assets (KEK registry under .copylocker/). Runtime KEK wrapping is the M4-B server flow; this fixture proves the build-time half.",
+  "payload": "pro demo asset plaintext"
+}

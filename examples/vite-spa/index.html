@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="/copylocker-seal.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/src/style.css" />
+    <title>CopyLocker Web Lab — Vite SPA</title>
+    <script type="module" src="/src/main.ts"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <img src="/copylocker-seal.svg" alt="" width="40" height="40" />
+        <div>
+          <strong>CopyLocker</strong>
+          <span>Web Lab / Vite SPA</span>
+        </div>
+      </div>
+      <!-- Advisory state badge. The SDK state is display-only and must never
+           gate features; unseal() success/failure is the real signal. -->
+      <div class="state-line" aria-live="polite" title="Advisory only — never gate features on this value">
+        <span class="state-dot" data-testid="state-dot"></span>
+        <span data-testid="license-state">booting</span>
+        <em class="advisory-tag">advisory only</em>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel" aria-label="Activation">
+        <h1>License operations</h1>
+        <p class="meta">
+          Server <code data-testid="server-url"></code> · Product
+          <code data-testid="product-id"></code> · SDK
+          <span data-testid="sdk-status">initializing…</span>
+        </p>
+
+        <form id="activate-form" class="row">
+          <label for="license-key">License key</label>
+          <input
+            id="license-key"
+            name="key"
+            autocomplete="off"
+            placeholder="CL-XXXX-…"
+            required
+            data-testid="license-key-input"
+          />
+          <button type="submit" data-testid="activate-button">Activate</button>
+          <button id="deactivate" type="button" class="quiet" data-testid="deactivate-button">
+            Deactivate
+          </button>
+        </form>
+      </section>
+
+      <section class="panel" aria-label="Sealed asset">
+        <h2>Sealed asset</h2>
+        <form id="unseal-form" class="row">
+          <label for="feature-id">Feature</label>
+          <input id="feature-id" value="demo-feature" required data-testid="feature-id-input" />
+          <button type="submit" data-testid="unseal-button">
+            Fetch &amp; unseal <code>/demo-asset.clx</code>
+          </button>
+        </form>
+        <pre class="output" data-testid="unseal-output" aria-live="polite">—</pre>
+      </section>
+
+      <footer class="panel log-panel" aria-label="Activity log">
+        <h2>Activity</h2>
+        <ul class="log" data-testid="status-log" aria-live="polite"></ul>
+      </footer>
+    </main>
+  </body>
+</html>
