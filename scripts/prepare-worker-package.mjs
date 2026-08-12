@@ -14,7 +14,7 @@ const repoRoot = resolve(scriptDir, "..");
 const buildDir = join(repoRoot, "crates", "copylocker-worker", "build");
 const manifestPath = join(buildDir, "package.json");
 const runtimeFiles = ["index_bg.wasm", "index.js"];
-const npmRepositoryUrl = "git+https://github.com/copylocker/copylocker.git";
+const npmRepositoryUrl = "git+https://github.com/backrunner/copylocker.git";
 
 if (!existsSync(manifestPath)) {
   throw new Error(`Worker package manifest is missing at ${manifestPath}`);

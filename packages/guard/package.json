@@ -33,7 +33,7 @@
   "license": "GPL-3.0-only",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/copylocker/copylocker.git",
+    "url": "git+https://github.com/backrunner/copylocker.git",
     "directory": "packages/guard"
   }
 }

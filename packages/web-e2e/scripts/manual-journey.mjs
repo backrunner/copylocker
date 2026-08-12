@@ -1,10 +1,13 @@
 /* Manual smoke of the full activation journey against the live local backend. */
 import { chromium } from '@playwright/test'
 import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const backend = JSON.parse(
-  readFileSync('/Volumes/BRData/projects/copylocker/target/tmp/web-e2e/backend.json', 'utf8'),
-)
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..')
+const backendJson = process.env.CL_E2E_BACKEND_JSON
+  ?? path.join(repoRoot, 'target/tmp/web-e2e/backend.json')
+const backend = JSON.parse(readFileSync(backendJson, 'utf8'))
 
 const browser = await chromium.launch()
 const page = await (await browser.newContext({ baseURL: 'http://127.0.0.1:4173' })).newPage()

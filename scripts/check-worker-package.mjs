@@ -11,7 +11,7 @@ const buildDir = join(repoRoot, "crates", "copylocker-worker", "build");
 const manifestPath = join(buildDir, "package.json");
 const templatePath = join(repoRoot, "server-template", "package.json");
 const expectedRuntimeFiles = ["index.js", "index_bg.wasm"];
-const expectedRepositoryUrl = "git+https://github.com/copylocker/copylocker.git";
+const expectedRepositoryUrl = "git+https://github.com/backrunner/copylocker.git";
 
 const manifest = readJson(manifestPath);
 const template = readJson(templatePath);
