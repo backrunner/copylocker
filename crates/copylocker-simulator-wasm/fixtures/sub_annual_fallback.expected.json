@@ -1,0 +1,56 @@
+{
+  "scenario": "sub-annual-fallback, cancel in year two",
+  "timeline": [
+    {
+      "at": 1767225600,
+      "event": "activate",
+      "detail": "tier=pro features=[ai.assist, export.pdf, export.png, export.svg, render.4k] validity=subscription(period=365d,dunning=14d,fallback=12mo@earned_at) version_scope=unlimited seats=1 mode=offline_hybrid heartbeat=none refresh_after=30d grace=14d offline_keys=false offline_upgrade=require_online",
+      "notable": false
+    },
+    {
+      "at": 1767225600,
+      "event": "credential_expiry",
+      "detail": "not_after=1799971200",
+      "notable": false
+    },
+    {
+      "at": 1798761600,
+      "event": "renew",
+      "detail": "state=Active continuous_paid_months=12 not_after=1831507200",
+      "notable": false
+    },
+    {
+      "at": 1798761600,
+      "event": "fallback_earned",
+      "detail": "perpetual fallback vested; version cap anchored at 1798761600",
+      "notable": true
+    },
+    {
+      "at": 1811721600,
+      "event": "cancel",
+      "detail": "state=Canceling; at period end will become PerpetualFallback capped at releases before 1798761600",
+      "notable": true
+    },
+    {
+      "at": 1830297600,
+      "event": "period_ends",
+      "detail": "state=PerpetualFallback; scope=ReleasedBefore(1798761600)",
+      "notable": true
+    },
+    {
+      "at": 1830384000,
+      "event": "run_release",
+      "detail": "rel_42 is outside the licensed scope — restricted mode. Highest covered release: rel_39",
+      "notable": true
+    },
+    {
+      "at": 1830384000,
+      "event": "run_release",
+      "detail": "rel_39 runs (variant 39)",
+      "notable": false
+    }
+  ],
+  "final_subscription_state": "perpetual_fallback",
+  "final_version_cutoff": 1798761600,
+  "policy_warnings": []
+}

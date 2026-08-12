@@ -1,0 +1,22 @@
+[package]
+name = "copylocker-client-memory-budget"
+description = "Non-published harness for the NFR-PERF-007 desktop SDK memory-increment budget."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[dependencies]
+copylocker-client = { workspace = true }
+copylocker-fingerprint = { workspace = true }
+copylocker-proto = { workspace = true, features = ["std"] }
+copylocker-store = { workspace = true }
+copylocker-suite = { workspace = true, features = ["std"] }
+copylocker-suite-std = { workspace = true, features = ["std", "pq-ml-dsa-65", "deterministic-rng"] }
+copylocker-types = { workspace = true, features = ["std"] }
+tokio = { workspace = true, features = ["rt"] }
+
+[lints]
+workspace = true

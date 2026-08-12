@@ -1,0 +1,25 @@
+[package]
+name = "copylocker-simulator-wasm"
+description = "Browser/console WASM shell over copylocker-server-core's policy simulator."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+# cdylib produces the .wasm artifact; rlib lets host-side consistency tests link the
+# platform-independent JSON core directly (same split as copylocker-wasm).
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+copylocker-server-core = { workspace = true, features = ["serde"] }
+serde = { workspace = true, features = ["derive", "alloc"] }
+serde_json = { workspace = true, features = ["std"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen = { workspace = true }
+
+[lints]
+workspace = true

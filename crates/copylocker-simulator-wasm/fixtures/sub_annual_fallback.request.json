@@ -1,0 +1,224 @@
+{
+  "policy": {
+    "id": "sub-annual-fallback",
+    "product_id": "acme",
+    "name": "sub-annual-fallback",
+    "preset": "sub-annual-fallback",
+    "entitlement": {
+      "tier": "pro",
+      "extra_groups": [],
+      "grants": [],
+      "excluded_features": [],
+      "limit_overrides": {},
+      "limit_merge": {}
+    },
+    "validity": {
+      "kind": "subscription",
+      "period_secs": 31536000,
+      "dunning_grace_secs": 1209600,
+      "fallback": {
+        "after_months": 12,
+        "scope_at": "earned_at"
+      }
+    },
+    "version_scope": {
+      "kind": "unlimited"
+    },
+    "seats": {
+      "seats": 1,
+      "max_transfers": null,
+      "transfer_window_secs": null,
+      "heartbeat_secs": null
+    },
+    "mode": "offline_hybrid",
+    "runtime": {
+      "refresh_after_secs": 2592000,
+      "grace_secs": 1209600,
+      "fpr_tolerance": 70,
+      "allow_vm": true,
+      "allow_olk": false,
+      "allow_unbound_olk": false,
+      "vt_signature": "fast",
+      "offline_upgrade_policy": "require_online",
+      "preload_variants_n": 3,
+      "report_attrs": false
+    }
+  },
+  "catalog": {
+    "product_id": "acme",
+    "version": 1,
+    "features": [
+      {
+        "id": "export.png",
+        "label": "export.png"
+      },
+      {
+        "id": "export.pdf",
+        "label": "export.pdf"
+      },
+      {
+        "id": "export.svg",
+        "label": "export.svg"
+      },
+      {
+        "id": "ai.assist",
+        "label": "ai.assist"
+      },
+      {
+        "id": "render.4k",
+        "label": "render.4k"
+      },
+      {
+        "id": "team.share",
+        "label": "team.share"
+      }
+    ],
+    "groups": [
+      {
+        "id": "export-basic",
+        "label": "Basic export",
+        "members": {
+          "includes": [],
+          "features": [
+            "export.png"
+          ]
+        }
+      },
+      {
+        "id": "export-pro",
+        "label": "Pro export",
+        "members": {
+          "includes": [
+            "export-basic"
+          ],
+          "features": [
+            "export.pdf",
+            "export.svg"
+          ]
+        }
+      },
+      {
+        "id": "pro-suite",
+        "label": "Pro suite",
+        "members": {
+          "includes": [
+            "export-pro"
+          ],
+          "features": [
+            "ai.assist",
+            "render.4k"
+          ]
+        }
+      }
+    ],
+    "tiers": [
+      {
+        "id": "free",
+        "label": "Free",
+        "rank": 0,
+        "groups": [
+          "export-basic"
+        ],
+        "features": [],
+        "limits": {
+          "max_projects": 3
+        }
+      },
+      {
+        "id": "pro",
+        "label": "Pro",
+        "rank": 10,
+        "groups": [
+          "pro-suite"
+        ],
+        "features": [],
+        "limits": {
+          "max_projects": 100
+        }
+      },
+      {
+        "id": "team",
+        "label": "Team",
+        "rank": 20,
+        "groups": [
+          "pro-suite"
+        ],
+        "features": [
+          "team.share"
+        ],
+        "limits": {
+          "max_members": 25,
+          "max_projects": -1
+        }
+      }
+    ]
+  },
+  "registry": {
+    "releases": [
+      {
+        "id": "rel_38",
+        "product_id": "acme",
+        "app_version": "3.8.0",
+        "variant_id": 38,
+        "build_fingerprint": "bf38",
+        "channel": "stable",
+        "status": "active",
+        "compromised_action": null,
+        "published_at": 1767225600
+      },
+      {
+        "id": "rel_39",
+        "product_id": "acme",
+        "app_version": "3.9.0",
+        "variant_id": 39,
+        "build_fingerprint": "bf39",
+        "channel": "stable",
+        "status": "active",
+        "compromised_action": null,
+        "published_at": 1797465600
+      },
+      {
+        "id": "rel_42",
+        "product_id": "acme",
+        "app_version": "4.2.0",
+        "variant_id": 42,
+        "build_fingerprint": "bf42",
+        "channel": "stable",
+        "status": "active",
+        "compromised_action": null,
+        "published_at": 1825113600
+      }
+    ]
+  },
+  "scenario": {
+    "name": "sub-annual-fallback, cancel in year two",
+    "steps": [
+      {
+        "kind": "activate",
+        "at": 1767225600
+      },
+      {
+        "kind": "renew",
+        "at": 1798761600
+      },
+      {
+        "kind": "cancel",
+        "at": 1811721600
+      },
+      {
+        "kind": "period_ends",
+        "at": 1830297600
+      },
+      {
+        "kind": "run_release",
+        "at": 1830384000,
+        "release_id": "rel_42"
+      },
+      {
+        "kind": "run_release",
+        "at": 1830384000,
+        "release_id": "rel_39"
+      }
+    ]
+  }
+}
