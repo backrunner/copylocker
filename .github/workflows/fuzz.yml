@@ -13,7 +13,7 @@ jobs:
   fuzz:
     name: ${{ matrix.target }}
     runs-on: ubuntu-latest
-    timeout-minutes: 255
+    timeout-minutes: 300
     strategy:
       fail-fast: false
       matrix:
@@ -35,4 +35,16 @@ jobs:
         working-directory: fuzz
         env:
           FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '14400' || '60' }}
-        run: cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time="$FUZZ_SECONDS" -max_len=65536
+        run: |
+          set -e
+          # Long runs restart the fuzzer process every segment: libFuzzer/ASAN
+          # accrues RSS per exec on large corpora, so one continuous multi-hour
+          # process crosses the default 2048 MB limit and dies with exit 71
+          # even though the targets themselves hold a flat RSS (see agent.md).
+          segment=1800
+          remaining="$FUZZ_SECONDS"
+          while [ "$remaining" -gt 0 ]; do
+            step=$(( remaining < segment ? remaining : segment ))
+            cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time="$step" -max_len=65536
+            remaining=$(( remaining - step ))
+          done
