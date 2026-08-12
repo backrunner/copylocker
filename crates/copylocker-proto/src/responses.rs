@@ -115,6 +115,65 @@ impl ProtocolErrorResponse {
     }
 }
 
+/// A freshly issued or rotated Mode E account session
+/// (`POST /v1/account/login` and `/v1/account/refresh`).
+///
+/// Both tokens are bearer secrets. The server stores only their hashes; the client must keep
+/// them in protected storage and must never log them.
+#[derive(Clone, PartialEq, Eq)]
+pub struct AccountSession {
+    /// Short-lived token presented as the activation credential.
+    pub account_token: [u8; crate::requests::ACCOUNT_TOKEN_LEN],
+    /// Longer-lived token used to rotate the session.
+    pub refresh_token: [u8; crate::requests::ACCOUNT_TOKEN_LEN],
+    /// Access token expiry (Unix seconds).
+    pub expires_at: i64,
+    /// Refresh token expiry (Unix seconds).
+    pub refresh_expires_at: i64,
+}
+
+impl AccountSession {
+    /// Encode as canonical CBOR.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        let mut builder = MapBuilder::new();
+        builder.put(0, CborValue::Bytes(self.account_token.to_vec()));
+        builder.put(1, CborValue::Bytes(self.refresh_token.to_vec()));
+        builder.put(2, CborValue::int(self.expires_at));
+        builder.put(3, CborValue::int(self.refresh_expires_at));
+        builder.finish()
+    }
+
+    /// Decode a bounded deterministic-CBOR session.
+    pub fn decode(bytes: &[u8]) -> Result<Self, ProtoError> {
+        if bytes.len() > copylocker_types::MAX_BODY_BYTES {
+            return Err(ProtoError::Codec(CodecError::TooLong));
+        }
+        let value = decode_canonical(bytes, CLIENT_LIMITS)?;
+        if value.as_map().is_none_or(|entries| entries.len() != 4) {
+            return Err(ProtoError::Codec(CodecError::Malformed));
+        }
+        Ok(Self {
+            account_token: field::fixed::<{ crate::requests::ACCOUNT_TOKEN_LEN }>(&value, 0)?,
+            refresh_token: field::fixed::<{ crate::requests::ACCOUNT_TOKEN_LEN }>(&value, 1)?,
+            expires_at: field::int(&value, 2)?,
+            refresh_expires_at: field::int(&value, 3)?,
+        })
+    }
+}
+
+impl core::fmt::Debug for AccountSession {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        formatter
+            .debug_struct("AccountSession")
+            .field("account_token", &"<redacted>")
+            .field("refresh_token", &"<redacted>")
+            .field("expires_at", &self.expires_at)
+            .field("refresh_expires_at", &self.refresh_expires_at)
+            .finish()
+    }
+}
+
 /// `{ 0: true }` response used by deactivation and similar commands.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub struct AckResponse {
@@ -191,5 +250,27 @@ mod tests {
         let mut invalid = MapBuilder::new();
         invalid.put(0, CborValue::Uint(1));
         assert!(AckResponse::decode(&invalid.finish()).is_err());
+    }
+
+    #[test]
+    fn account_session_round_trips_without_leaking_tokens() {
+        let session = AccountSession {
+            account_token: [1; crate::requests::ACCOUNT_TOKEN_LEN],
+            refresh_token: [2; crate::requests::ACCOUNT_TOKEN_LEN],
+            expires_at: 1_700_003_600,
+            refresh_expires_at: 1_702_592_000,
+        };
+        assert_eq!(AccountSession::decode(&session.encode()).unwrap(), session);
+        let rendered = alloc::format!("{session:?}");
+        assert!(rendered.contains("<redacted>"));
+        assert!(!rendered.contains("account_token: ["));
+
+        let mut extra = MapBuilder::new();
+        extra.put(0, CborValue::Bytes(alloc::vec![1; 32]));
+        extra.put(1, CborValue::Bytes(alloc::vec![2; 32]));
+        extra.put(2, CborValue::int(3));
+        extra.put(3, CborValue::int(4));
+        extra.put(4, CborValue::Uint(0));
+        assert!(AccountSession::decode(&extra.finish()).is_err());
     }
 }

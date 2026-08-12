@@ -25,6 +25,11 @@ pub const LIMIT_UNLIMITED: LimitValue = -1;
 /// CBOR encoding — and therefore the signature — is reproducible.
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct Entitlements {
     /// Fully expanded feature identifiers. No globs, no duplicates, sorted.
     pub features: BTreeSet<String>,
@@ -70,6 +75,11 @@ impl Entitlements {
 /// Which application versions a license covers (`licensing-model.md §4`).
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 #[cfg_attr(
     feature = "serde",
     serde(tag = "kind", content = "value", rename_all = "snake_case")
@@ -90,6 +100,11 @@ pub enum VersionScope {
 /// Lifecycle state of a subscription, mirrored to the client for messaging only.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum SubscriptionState {
     /// Paid and current.
@@ -120,6 +135,11 @@ impl SubscriptionState {
 /// "3 more months until you keep this version forever" (`licensing-model.md §9`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 pub struct SubscriptionHint {
     /// Current lifecycle state.
     pub state: SubscriptionState,

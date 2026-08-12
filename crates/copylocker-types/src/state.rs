@@ -227,6 +227,11 @@ impl ArtifactKind {
 /// Enforcement mode (`protocol-spec.md §4`, field 14; axis five of the policy model).
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "ts-rs", derive(ts_rs::TS))]
+#[cfg_attr(
+    feature = "ts-rs",
+    ts(export, export_to = "../../../packages/admin-sdk/bindings/")
+)]
 #[cfg_attr(feature = "serde", serde(rename_all = "snake_case"))]
 pub enum Mode {
     /// Mode O: works offline within `refresh_after` + grace.

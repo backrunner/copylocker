@@ -161,7 +161,7 @@ pub fn olk_binding_fingerprint(bound: Option<&Fingerprint>) -> Fingerprint {
         .unwrap_or_else(|| Fingerprint::from_vec(UNBOUND_OLK_BINDING_LABEL.to_vec()))
 }
 
-fn crockford_encode(bytes: &[u8]) -> String {
+pub(crate) fn crockford_encode(bytes: &[u8]) -> String {
     let mut output = String::with_capacity(bytes.len().saturating_mul(8).div_ceil(5));
     let mut buffer = 0u16;
     let mut bits = 0u8;
@@ -182,7 +182,7 @@ fn crockford_encode(bytes: &[u8]) -> String {
     output
 }
 
-fn crockford_decode(input: &str) -> Result<Vec<u8>, ProtoError> {
+pub(crate) fn crockford_decode(input: &str) -> Result<Vec<u8>, ProtoError> {
     if input.is_empty() || input.len() > MAX_OLK_BUNDLE_BYTES.saturating_mul(8).div_ceil(5) {
         return Err(ProtoError::Codec(CodecError::TooLong));
     }
