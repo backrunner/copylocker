@@ -1,0 +1,37 @@
+{
+  "name": "@copylocker/admin-sdk",
+  "version": "0.1.0",
+  "description": "CopyLocker Admin API client SDK — typed access to the Worker's /v1/admin management endpoints.",
+  "type": "module",
+  "sideEffects": false,
+  "files": [
+    "dist"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.json --emitDeclarationOnly",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "check:bindings": "tsc -p tsconfig.bindings.json --noEmit",
+    "test": "vitest run",
+    "prepack": "npm run build && npm test"
+  },
+  "devDependencies": {
+    "tsup": "8.5.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  },
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/copylocker/copylocker.git",
+    "directory": "packages/admin-sdk"
+  }
+}
