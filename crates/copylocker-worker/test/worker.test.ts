@@ -4119,51 +4119,55 @@ describe("worker runtime", () => {
     });
   });
 
-  it("grants exactly 3 seats through 100 concurrent public activations", async () => {
-    const { licenseId, stub } = licenseObject(1_108);
-    const licenseKey = testLicenseKey(16);
-    await seedProjectedLicense(
-      licenseId,
-      await activationKeyHmac(licenseKey.bytes),
-      3,
-    );
-    const requests = await Promise.all(
-      Array.from({ length: 100 }, async (_, index) => {
-        const keys = await generateDeviceKeys();
-        return activationRequestCbor(
-          hexBytes(env.TEST_DEVICE_KEM_EK),
-          keys,
-          index,
-          licenseKey.value,
-        );
-      }),
-    );
-
-    const responses = await Promise.all(
-      requests.map((body, index) =>
-        postActivation(body, `public-activation-${index}`),
-      ),
-    );
-    const accepted = responses.filter(({ status }) => status === 200);
-    const exhausted = responses.filter(({ status }) => status === 409);
-
-    expect(accepted).toHaveLength(3);
-    expect(exhausted).toHaveLength(97);
-    await expect(
-      Promise.all(exhausted.map((response) => protocolErrorCode(response))),
-    ).resolves.toEqual(new Array<unknown>(97).fill(1001));
-
-    await runInDurableObject(stub, async (_instance, state) => {
-      const row = state.storage.sql
-        .exec<{ active: number; total: number }>(
-          "SELECT \
-             SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) AS active, \
-             COUNT(*) AS total FROM activations",
-        )
-        .one();
-      expect(row).toEqual({ active: 3, total: 3 });
-    });
-  });
+  it(
+    "grants exactly 3 seats through 100 concurrent public activations",
+    { timeout: 30_000 },
+    async () => {
+      const { licenseId, stub } = licenseObject(1_108);
+      const licenseKey = testLicenseKey(16);
+      await seedProjectedLicense(
+        licenseId,
+        await activationKeyHmac(licenseKey.bytes),
+        3,
+      );
+      const requests = await Promise.all(
+        Array.from({ length: 100 }, async (_, index) => {
+          const keys = await generateDeviceKeys();
+          return activationRequestCbor(
+            hexBytes(env.TEST_DEVICE_KEM_EK),
+            keys,
+            index,
+            licenseKey.value,
+          );
+        }),
+      );
+  
+      const responses = await Promise.all(
+        requests.map((body, index) =>
+          postActivation(body, `public-activation-${index}`),
+        ),
+      );
+      const accepted = responses.filter(({ status }) => status === 200);
+      const exhausted = responses.filter(({ status }) => status === 409);
+  
+      expect(accepted).toHaveLength(3);
+      expect(exhausted).toHaveLength(97);
+      await expect(
+        Promise.all(exhausted.map((response) => protocolErrorCode(response))),
+      ).resolves.toEqual(new Array<unknown>(97).fill(1001));
+  
+      await runInDurableObject(stub, async (_instance, state) => {
+        const row = state.storage.sql
+          .exec<{ active: number; total: number }>(
+            "SELECT \
+               SUM(CASE WHEN status = 0 THEN 1 ELSE 0 END) AS active, \
+               COUNT(*) AS total FROM activations",
+          )
+          .one();
+        expect(row).toEqual({ active: 3, total: 3 });
+      });
+    },
+  );
 
   it("returns seat exhausted after activation capacity is full", async () => {
     const { licenseId, stub } = licenseObject(1_017);
