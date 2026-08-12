@@ -1,0 +1,116 @@
+/*
+ * CopyLocker theme overrides for svedocs.
+ * Neutral oklch gray scale mirrors apps/console/src/app.css; accent is teal.
+ * Imported after `svedocs/theme/styles.css` in src/routes/+layout.svelte.
+ */
+
+:root {
+  --sd-bg: oklch(1 0 0);
+  --sd-ink: oklch(0.205 0 0);
+  --sd-muted: oklch(0.556 0 0);
+  --sd-line: oklch(0.922 0 0);
+  --sd-grid-line: color-mix(in srgb, var(--sd-line) 55%, transparent);
+  --sd-panel: oklch(1 0 0);
+  --sd-accent: oklch(0.55 0.12 190);
+  --sd-accent-2: oklch(0.45 0.1 205);
+  --sd-scrollbar-thumb: color-mix(in srgb, var(--sd-ink) 24%, transparent);
+  --sd-scrollbar-thumb-hover: color-mix(in srgb, var(--sd-accent) 62%, var(--sd-ink));
+}
+
+:root[data-theme='dark'],
+html:has(.sd-root[data-theme='dark']),
+.sd-root[data-theme='dark'] {
+  --sd-bg: oklch(0.145 0 0);
+  --sd-ink: oklch(0.985 0 0);
+  --sd-muted: oklch(0.708 0 0);
+  --sd-line: oklch(1 0 0 / 10%);
+  --sd-grid-line: color-mix(in srgb, var(--sd-line) 60%, transparent);
+  --sd-panel: oklch(0.205 0 0);
+  --sd-accent: oklch(0.75 0.13 178);
+  --sd-accent-2: oklch(0.82 0.1 165);
+  --sd-scrollbar-thumb: color-mix(in srgb, var(--sd-ink) 28%, transparent);
+  --sd-scrollbar-thumb-hover: color-mix(in srgb, var(--sd-accent) 70%, var(--sd-ink));
+}
+
+/* The brand logo already carries the mark; hide the default pixel mark when a logo is set. */
+.sd-brand-logo {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
+/* Callouts (authored as raw HTML blocks in content; markdown pipelines do not
+   process markdown inside HTML, so bodies are plain HTML). */
+.sd-prose .cl-callout {
+  margin: 1.25rem 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--sd-line);
+  border-left-width: 3px;
+  border-radius: var(--sd-radius);
+  background: var(--sd-panel);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.sd-prose .cl-callout-title {
+  margin: 0 0 0.375rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sd-prose .cl-callout > p:last-child,
+.sd-prose .cl-callout > ul:last-child {
+  margin-bottom: 0;
+}
+
+.sd-prose .cl-callout-info {
+  border-left-color: var(--sd-accent);
+}
+
+.sd-prose .cl-callout-info .cl-callout-title {
+  color: var(--sd-accent);
+}
+
+.sd-prose .cl-callout-warning {
+  border-left-color: oklch(0.72 0.15 75);
+}
+
+.sd-prose .cl-callout-warning .cl-callout-title {
+  color: oklch(0.58 0.14 70);
+}
+
+.sd-prose .cl-callout-danger {
+  border-left-color: oklch(0.577 0.245 27.325);
+}
+
+.sd-prose .cl-callout-danger .cl-callout-title {
+  color: oklch(0.577 0.245 27.325);
+}
+
+:is(:root[data-theme='dark'], html:has(.sd-root[data-theme='dark']), .sd-root[data-theme='dark'])
+  .sd-prose
+  .cl-callout-warning
+  .cl-callout-title {
+  color: oklch(0.8 0.13 80);
+}
+
+.sd-prose .cl-details {
+  margin: 1.25rem 0;
+  padding: 0.875rem 1rem;
+  border: 1px solid var(--sd-line);
+  border-radius: var(--sd-radius);
+  background: var(--sd-panel);
+  font-size: 0.9375rem;
+  line-height: 1.6;
+}
+
+.sd-prose .cl-details summary {
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.sd-prose .cl-details p:last-child {
+  margin-bottom: 0;
+}
