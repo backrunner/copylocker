@@ -12,9 +12,13 @@ release/
 
 # JavaScript and Cloudflare local state
 node_modules/
+.next/
 .wrangler/
 .dev.vars
 .dev.vars.*
+
+# Local M4 build key material (dev signing keys, KEK registry, wrapping keys)
+.copylocker/
 
 # Local browser QA state and screenshots
 /.playwright-cli/
