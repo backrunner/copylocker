@@ -51,8 +51,12 @@ command line.
 
 Bootstrap creates only the Admin token pepper. Provision every other bound secret used by your
 deployment, including `SERVER_PEPPER`, `EPOCH_SIGNING_KEY`, `EPOCH_FAST_SIGNING_KEY`,
-`VARIANT_PARAMS_KEY`, `ASSET_KEK_KEY`, and enabled payment webhook secrets. Secret values are
-complete versioned JSON objects and never belong in `wrangler.jsonc`.
+`VARIANT_PARAMS_KEY`, `ASSET_KEK_KEY`, `BUILD_SIGNING_KEY`, and enabled payment webhook secrets.
+Secret values are complete versioned JSON objects and never belong in `wrangler.jsonc`.
+`BUILD_SIGNING_KEY` holds the Ed25519 build-manifest signing seed; register its public key per
+product with `POST /v1/admin/integrity/keys` before CI can call
+`POST /v1/admin/integrity/sign`. CI OIDC authentication is configured through the
+`INTEGRITY_OIDC_*` vars documented in the Worker source.
 
 ## Deploy and operate
 
