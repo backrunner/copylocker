@@ -75,6 +75,11 @@
       "secret_name": "ASSET_KEK_KEY"
     },
     {
+      "binding": "BUILD_SIGNING_KEY",
+      "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
+      "secret_name": "BUILD_SIGNING_KEY"
+    },
+    {
       "binding": "STRIPE_WEBHOOK_SECRET",
       "store_id": "__COPYLOCKER_SECRET_STORE_ID__",
       "secret_name": "STRIPE_WEBHOOK_SECRET"
@@ -106,7 +111,7 @@
     ]
   },
   "triggers": {
-    "crons": ["* * * * *"]
+    "crons": ["* * * * *", "15 0 * * *"]
   },
   "vars": {
     "ENVIRONMENT": "production"
