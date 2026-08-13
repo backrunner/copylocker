@@ -649,12 +649,19 @@ vue 8/8 each, examples build green (electron 5/5, tauri cargo check 333 crates).
   against source: `docs/reference/{cli,admin-api,sdks}.md`, `docs/guide/console.md`,
   `docs/operations/privacy.md`; deployment.md gained the OIDC vars, `BUILD_SIGNING_KEY`,
   the migration list, and the daily-rollup cron; the stale "console is M7" FAQ answer was
-  corrected. Sidebar ordering is weight-driven (section weight = min of page `order`
-  values, ties by path), so sections use disjoint order ranges: docs 0, guide 1-9,
-  reference 10-13, operations 20-24, security 30-31. Gotcha: svedocs 0.1.0's TOC slugger
-  disagrees with the heading slugger on headings containing `<...>` (e.g. `### init
-  <path>`) — avoid angle brackets in headings. Deployed to production; all new routes
-  verified 200 on `copylocker-docs.pages.dev`.
+  corrected. Sidebar ordering is weight-driven, so sections use disjoint order ranges:
+  docs 0, guide 1-9, reference 10-13, operations 20-24, security 30-31. Deployed to
+  production; all new routes verified 200 on `copylocker-docs.pages.dev`.
+  2026-08-13 (upstream fixes): the two svedocs 0.1.0 gotchas found during the docs
+  work were fixed at the source in `../svedocs` (commits b652882 / f8479c6 / f6de35c,
+  changeset `heading-id-and-section-order.md`, local only — not pushed, not published):
+  (1) outline/search heading ids now mirror the rehype side exactly (angle brackets in
+  code spans, adjacent inline formatting), (2) a section index page's explicit `order`
+  now pins the section's sidebar position (min-of-children only without an index
+  order). Both verified against this docs site via a packed 0.1.1-beta.2 tarball; the
+  site then restored its exact 0.1.0 pin (`npm ci`). Until a fixed svedocs release is
+  published and re-pinned here, keep the workarounds: no `<...>` in headings, disjoint
+  order ranges.
 - Commits up to the wasm commit are GPG-signed; later commits are unsigned per the
   owner's authorization (non-interactive gpg-agent).
 
