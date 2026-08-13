@@ -653,8 +653,9 @@ vue 8/8 each, examples build green (electron 5/5, tauri cargo check 333 crates).
   docs 0, guide 1-9, reference 10-13, operations 20-24, security 30-31. Deployed to
   production; all new routes verified 200 on `copylocker-docs.pages.dev`.
   2026-08-13 (upstream fixes): the two svedocs 0.1.0 gotchas found during the docs
-  work were fixed at the source in `../svedocs` (commits b652882 / f8479c6 / f6de35c,
-  changeset `heading-id-and-section-order.md`, local only — not pushed, not published):
+  work were fixed at the source in `../svedocs` (commits b652882 / f8479c6 / f6de35c /
+  d1687e5, changeset `heading-id-and-section-order.md`, pushed to svedocs main; **not
+  released** — keep this site on the npm 0.1.0 pin):
   (1) outline/search heading ids now mirror the rehype side exactly (angle brackets in
   code spans, adjacent inline formatting), (2) a section index page's explicit `order`
   now pins the section's sidebar position (min-of-children only without an index
