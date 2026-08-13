@@ -627,11 +627,18 @@ vue 8/8 each, examples build green (electron 5/5, tauri cargo check 333 crates).
 - The docs site moved from VitePress to svedocs 0.1.0 (exact-pinned, npm) with a custom
   CopyLocker theme and landing page. Build: `npm run build` in `docs/` (edge mode,
   `.svelte-kit/cloudflare`); deploy: `npm run deploy` (Cloudflare Pages project
-  `copylocker-docs`). The production target is `https://copylocker.pwp.sh`; attaching
-  the custom domain and creating the Pages project are Cloudflare dashboard actions,
-  as is setting the `CL_DOCS_DEPLOY` variable + `CLOUDFLARE_API_TOKEN` /
-  `CLOUDFLARE_ACCOUNT_ID` secrets that un-gate the docs workflow's deploy job.
-  GitHub Pages stays disabled.
+  `copylocker-docs`). The production target is `https://copylocker.pwp.sh`.
+  2026-08-13: the Pages project was created and the first production deployment was
+  shipped from the local checkout with
+  `wrangler pages deploy .svelte-kit/cloudflare --project-name copylocker-docs --branch main`
+  (wrangler OAuth login, account "Alkinum"); `https://copylocker-docs.pages.dev`
+  serves landing, docs pages, sitemap, search API, and the static OG SVGs, and the
+  rendered `og:image` tags already point at `https://copylocker.pwp.sh`. Per the
+  owner, deploys run locally via wrangler, not from CI. The remaining step is a
+  Cloudflare dashboard action: Pages -> copylocker-docs -> Custom domains -> add
+  `copylocker.pwp.sh` (the pwp.sh zone lives on the same account, so DNS and the
+  certificate are automatic; wrangler has no Pages domain command). The
+  `CL_DOCS_DEPLOY` CI gate stays off. GitHub Pages stays disabled.
 - Commits up to the wasm commit are GPG-signed; later commits are unsigned per the
   owner's authorization (non-interactive gpg-agent).
 
