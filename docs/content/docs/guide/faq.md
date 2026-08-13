@@ -1,7 +1,7 @@
 ---
 title: FAQ
 navTitle: FAQ
-order: 8
+order: 9
 description: Frequently asked questions about CopyLocker, answered honestly against the shipped implementation and the threat model.
 ---
 
@@ -88,8 +88,11 @@ Server logic is decoupled from Cloudflare behind a `Storage` trait (NFR-PORT-004
 possible but not promised or supported. The shipped, tested target is Cloudflare.
 
 **Is there an admin console?**
-Not yet — it is milestone M7. Today everything runs through the `copylocker` CLI and the
-authenticated Admin API.
+Yes — `apps/console` is a SvelteKit app you deploy alongside the API Worker. It covers licenses,
+epochs, catalogs, telemetry, and DSR operations, and it is an untrusted frontend: authorization
+always happens in the API Worker. Before any production deployment, complete the Cloudflare
+Access JWKS verification noted in [Deployment → The admin
+console](/docs/guide/deployment#the-admin-console).
 
 **What license is CopyLocker under?**
 The public repository is GPL-3.0-only. Proprietary suite code lives in a separate commercial

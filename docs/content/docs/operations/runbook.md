@@ -1,7 +1,7 @@
 ---
 title: Runbook
 navTitle: Runbook
-order: 1
+order: 21
 description: Incident response procedures for a CopyLocker deployment — activation spikes, epoch revocation drills, key compromise, queues, and periodic tasks.
 ---
 
