@@ -1,26 +1,45 @@
-<section class="cl-section" aria-labelledby="cl-code-title">
-  <p class="cl-kicker"><span class="cl-kicker-mark" aria-hidden="true"></span>From zero to first unseal</p>
-  <h2 id="cl-code-title" class="cl-section-title">Three commands</h2>
-  <div class="cl-terminal">
-    <div class="cl-terminal-bar" aria-hidden="true">
-      <span class="cl-terminal-dot"></span>
-      <span class="cl-terminal-dot"></span>
-      <span class="cl-terminal-dot"></span>
-      <span class="cl-terminal-title">copylocker — quickstart</span>
+<section class="cl-band" aria-labelledby="cl-code-title">
+  <div class="cl-section">
+    <p class="cl-kicker"><span class="cl-kicker-mark" aria-hidden="true"></span>From zero to first unseal</p>
+    <h2 id="cl-code-title" class="cl-section-title">Three commands</h2>
+    <div class="cl-terminal">
+      <div class="cl-terminal-bar" aria-hidden="true">
+        <span class="cl-terminal-dot"></span>
+        <span class="cl-terminal-dot"></span>
+        <span class="cl-terminal-dot"></span>
+        <span class="cl-terminal-title">copylocker — quickstart</span>
+      </div>
+      <pre><code
+          ><span class="cl-line"><span class="cl-prompt">$</span> <span class="cl-cmd">cargo install --locked --path crates/copylocker-cli</span></span
+          ><span class="cl-line"><span class="cl-prompt">$</span> <span class="cl-cmd">copylocker init server --product my-app \
+      --d1-database-id … --kv-namespace-id … --secret-store-id …</span></span
+          ><span class="cl-line"><span class="cl-prompt">$</span> <span class="cl-cmd">copylocker deploy --confirm</span></span></code></pre>
+      <p class="cl-terminal-note">
+        Server up, license issued, first <code>unseal()</code> — the full loop is in the
+        <a href="/docs/guide/quickstart">5-minute quickstart</a>.
+      </p>
     </div>
-    <pre><code
-        ><span class="cl-line"><span class="cl-prompt">$</span> <span class="cl-cmd">cargo install --locked --path crates/copylocker-cli</span></span
-        ><span class="cl-line"><span class="cl-prompt">$</span> <span class="cl-cmd">copylocker init server --product my-app \
-    --d1-database-id … --kv-namespace-id … --secret-store-id …</span></span
-        ><span class="cl-line"><span class="cl-prompt">$</span> <span class="cl-cmd">copylocker deploy --confirm</span></span></code></pre>
-    <p class="cl-terminal-note">
-      Server up, license issued, first <code>unseal()</code> — the full loop is in the
-      <a href="/docs/guide/quickstart">5-minute quickstart</a>.
-    </p>
   </div>
 </section>
 
 <style>
+  /* Full-bleed dark band: local token overrides keep every nested element legible
+     in both light and dark site themes. */
+  .cl-band {
+    --sd-ink: oklch(0.93 0 0);
+    --sd-muted: oklch(0.65 0 0);
+    --sd-line: oklch(1 0 0 / 12%);
+    --sd-panel: oklch(0.19 0 0);
+    background:
+      radial-gradient(
+        46rem 22rem at 85% 0%,
+        color-mix(in srgb, var(--sd-accent) 12%, transparent),
+        transparent 65%
+      ),
+      oklch(0.16 0 0);
+    border-block: 1px solid oklch(0 0 0 / 30%);
+  }
+
   .cl-section-title {
     margin: 0.75rem 0 2.25rem;
     font-size: clamp(1.5rem, 3.5vw, 2rem);
@@ -34,7 +53,7 @@
     border: 1px solid var(--sd-line);
     border-radius: var(--sd-radius);
     overflow: hidden;
-    background: oklch(0.145 0 0);
+    background: oklch(0.12 0 0);
     color: oklch(0.92 0 0);
   }
 

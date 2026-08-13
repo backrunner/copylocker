@@ -2,7 +2,7 @@
   <div class="cl-honest">
     <p class="cl-kicker"><span class="cl-kicker-mark" aria-hidden="true"></span>Honest security</p>
     <h2 id="cl-honest-title" class="cl-honest-title">
-      We raise the cost of cracking. We do not claim impossibility.
+      We raise the cost of cracking.<br />We do not claim impossibility.
     </h2>
     <p class="cl-honest-body">
       An attacker with physical control of a machine can eventually extract whatever that machine
@@ -18,34 +18,30 @@
 
 <style>
   .cl-honest {
-    border: 1px solid var(--sd-line);
-    border-left: 3px solid var(--sd-accent);
-    border-radius: var(--sd-radius);
-    padding: clamp(1.75rem, 4vw, 2.75rem);
-    background: var(--sd-panel);
+    max-width: 46rem;
+    padding-top: 2.5rem;
+    border-top: 2px solid var(--sd-accent);
   }
 
   .cl-honest-title {
-    margin: 0.875rem 0 1rem;
-    max-width: 34rem;
-    font-size: clamp(1.375rem, 3vw, 1.75rem);
+    margin: 0.875rem 0 1.25rem;
+    font-size: clamp(1.625rem, 3.6vw, 2.25rem);
     font-weight: 650;
-    letter-spacing: -0.02em;
-    line-height: 1.25;
+    letter-spacing: -0.025em;
+    line-height: 1.18;
     color: var(--sd-ink);
     text-wrap: balance;
   }
 
   .cl-honest-body {
     margin: 0;
-    max-width: 42rem;
     font-size: 1rem;
     line-height: 1.65;
     color: var(--sd-muted);
   }
 
   .cl-honest-link {
-    margin: 1.25rem 0 0;
+    margin: 1.5rem 0 0;
     font-size: 0.9375rem;
   }
 

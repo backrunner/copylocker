@@ -26,6 +26,7 @@ export default defineConfig({
     },
     nav: [
       { label: 'Guide', href: '/docs/guide/quickstart' },
+      { label: 'Reference', href: '/docs/reference' },
       { label: 'Security', href: '/docs/security/threat-model' },
       { label: 'Operations', href: '/docs/operations/runbook' }
     ],
@@ -46,13 +47,15 @@ export default defineConfig({
         },
         {
           label: 'Licensing',
-          href: 'https://github.com/backrunner/copylocker/blob/main/LICENSING.md',
-          external: true
+          href: '/docs/guide/licensing-model'
         },
         {
-          label: 'Security',
-          href: 'https://github.com/backrunner/copylocker/blob/main/SECURITY.md',
-          external: true
+          label: 'Threat model',
+          href: '/docs/security/threat-model'
+        },
+        {
+          label: 'Operations',
+          href: '/docs/operations/runbook'
         }
       ]
     }
