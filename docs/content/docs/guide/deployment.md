@@ -24,11 +24,24 @@ npm package** — it does not copy the Rust runtime. `wrangler.jsonc` binds:
   not hit Durable Objects (NFR-COST-002).
 - **R2** (`ARCHIVE`, bucket `<project-name>-archive`) — immutable audit/event archive.
 - **Secrets Store** — `EPOCH_SIGNING_KEY`, `EPOCH_FAST_SIGNING_KEY`, `SERVER_PEPPER`,
-  `ADMIN_TOKEN_PEPPER`, `VARIANT_PARAMS_KEY`, `ASSET_KEK_KEY`, and the payment webhook secrets
+  `ADMIN_TOKEN_PEPPER`, `VARIANT_PARAMS_KEY`, `ASSET_KEK_KEY`, `BUILD_SIGNING_KEY`, and the
+  payment webhook secrets
   (`STRIPE_WEBHOOK_SECRET`, `PADDLE_WEBHOOK_SECRET`, `LEMONSQUEEZY_WEBHOOK_SECRET`).
 - **Queues** — `EVENTS` producer; a consumer on `<project-name>-events` with
   `max_concurrency: 1` and the `<project-name>-events-dlq` dead-letter queue.
-- **Cron** — `* * * * *` (every minute).
+- **Cron** — `* * * * *` (every minute; the recovery spine) and `15 0 * * *` (the daily
+  analytics/telemetry rollup — see [Telemetry & DSR](/docs/operations/privacy)).
+
+Worker environment variables (plain vars, not secrets):
+
+- `ENVIRONMENT` — `"production"` in the template; `"test"` enables test-only seams and must
+  never reach a production deployment.
+- `INTEGRITY_OIDC_AUDIENCE` — required to enable GitHub Actions OIDC signing of integrity
+  manifests (`/v1/admin/integrity/sign`); OIDC is disabled without it.
+- `INTEGRITY_OIDC_ISSUER` (default `https://token.actions.githubusercontent.com`),
+  `INTEGRITY_OIDC_REPOSITORIES` and `INTEGRITY_OIDC_REFS` (comma-separated allowlists),
+  `INTEGRITY_OIDC_JWKS_URL` (default `{issuer}/.well-known/jwks`) — the rest of the OIDC
+  configuration.
 
 Observability is on by default: logs at 100% head sampling, traces at 1%.
 
@@ -45,6 +58,11 @@ migration check first. Use `--skip-migrations` only when a separately controlled
 applied the exact migration set.
 
 ## Migration discipline (enforced, not aspirational)
+
+The migration set is ten files, applied in order: `0001_initial`, `0002_release_feature_keks`,
+`0003_admin_revocations`, `0004_admin_audit`, `0005_billing_webhooks`,
+`0006_unified_admin_audit`, `0007_admin_operations`, `0008_epoch_approvals`,
+`0009_integrity_signer_keys`, `0010_release_admin`.
 
 - Worker and `server-template` migration files must be **byte-identical**.
   `scripts/check-server-template.sh` fails the build otherwise: it diffs every migration in both
@@ -101,7 +119,9 @@ and need `--confirm`. Epoch revocation additionally needs two distinct Admin act
 ## The admin console
 
 The console (`apps/console`) is a separate SvelteKit app deployed to Cloudflare
-(`npm run build && wrangler deploy` in that directory). It is an untrusted frontend: real
+(`npm run build && wrangler deploy` in that directory). Its pages, environment variables, and
+proxy routes are documented in [Admin Console](/docs/guide/console). It is an untrusted
+frontend: real
 authorization always happens in the API Worker (Bearer token + scope checks). The console's
 own route guard relies on Cloudflare Access:
 

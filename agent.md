@@ -639,6 +639,22 @@ vue 8/8 each, examples build green (electron 5/5, tauri cargo check 333 crates).
   `copylocker.pwp.sh` (the pwp.sh zone lives on the same account, so DNS and the
   certificate are automatic; wrangler has no Pages domain command). The
   `CL_DOCS_DEPLOY` CI gate stays off. GitHub Pages stays disabled.
+  2026-08-13 (second pass): the blueprint grid backgrounds were removed theme-wide
+  (`.sd-root` / reading-mode `::after` / home-hero `::before` overrides in
+  `src/lib/styles/copylocker.css`, plus frosted topbar, sidebar/prose/table/footer polish);
+  the landing was redesigned (editorial hero with a CSS-only credential card, numbered
+  feature cards, full-bleed dark command band, stepper levels); the footer GitHub-icon
+  duplication was fixed by pointing Licensing/Threat model at internal pages (svedocs
+  FooterLinks renders any github.com href as a GitHub icon). New content, all verified
+  against source: `docs/reference/{cli,admin-api,sdks}.md`, `docs/guide/console.md`,
+  `docs/operations/privacy.md`; deployment.md gained the OIDC vars, `BUILD_SIGNING_KEY`,
+  the migration list, and the daily-rollup cron; the stale "console is M7" FAQ answer was
+  corrected. Sidebar ordering is weight-driven (section weight = min of page `order`
+  values, ties by path), so sections use disjoint order ranges: docs 0, guide 1-9,
+  reference 10-13, operations 20-24, security 30-31. Gotcha: svedocs 0.1.0's TOC slugger
+  disagrees with the heading slugger on headings containing `<...>` (e.g. `### init
+  <path>`) — avoid angle brackets in headings. Deployed to production; all new routes
+  verified 200 on `copylocker-docs.pages.dev`.
 - Commits up to the wasm commit are GPG-signed; later commits are unsigned per the
   owner's authorization (non-interactive gpg-agent).
 

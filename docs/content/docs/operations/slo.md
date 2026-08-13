@@ -1,7 +1,7 @@
 ---
 title: SLOs & Alerting
 navTitle: SLOs & Alerting
-order: 2
+order: 22
 description: Service-level objectives for a CopyLocker deployment — SLIs, SLO targets, alert thresholds, and wiring notes.
 ---
 

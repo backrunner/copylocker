@@ -1,7 +1,7 @@
 ---
 title: Migration
 navTitle: Migration
-order: 7
+order: 8
 description: Moving to CopyLocker from another licensing system, and moving between CopyLocker versions — what exists today and what is only planned.
 ---
 
@@ -69,6 +69,7 @@ Designed-in guarantees you can rely on when upgrading:
   [Runbook](/docs/operations/runbook#credential-compromise-and-recovery)).
 - A `copylocker-cli dev-license` helper and `copylocker-cli estimate` cost command — both are
   requirements (NFR-DX-004 / NFR-COST-004) not yet surfaced in the CLI.
-- A `copylocker audit verify` command for end-to-end audit-chain verification.
+- A `copylocker audit verify` CLI command — the server endpoint (`/v1/admin/audit/verify`) and
+  the console's one-click verification exist; the gap is CLI-side only.
 - An Admin token lifecycle API; emergency token revocation is a documented break-glass procedure
   (see [Runbook](/docs/operations/runbook#credential-compromise-and-recovery)).

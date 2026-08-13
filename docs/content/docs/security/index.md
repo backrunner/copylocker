@@ -1,7 +1,7 @@
 ---
 title: Security
 navTitle: Security
-order: 1
+order: 30
 description: The CopyLocker security model, hardening guidance, and disclosure policy.
 ---
 

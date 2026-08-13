@@ -1,7 +1,7 @@
 ---
 title: Cost Estimation
 navTitle: Cost Estimation
-order: 3
+order: 23
 description: A usage model for the Cloudflare bill of a self-hosted CopyLocker server — 100k active devices validating daily under $20/month.
 ---
 

@@ -1,7 +1,7 @@
 ---
 title: Security & Threat Model
 navTitle: Security & Threat Model
-order: 1
+order: 31
 description: The public security contract of CopyLocker — scope, residual risks, assets, attacker profiles, and how the main attacks fail.
 ---
 
