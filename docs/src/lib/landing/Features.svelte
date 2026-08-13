@@ -37,9 +37,10 @@
   <p class="cl-kicker"><span class="cl-kicker-mark" aria-hidden="true"></span>What it does</p>
   <h2 id="cl-features-title" class="cl-section-title">Six things, done deliberately</h2>
   <ul class="cl-grid" role="list">
-    {#each features as feature}
+    {#each features as feature, i}
       <li>
         <a class="cl-card" href={feature.href}>
+          <span class="cl-card-num" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
           <span class="cl-card-title">{feature.title}</span>
           <span class="cl-card-line">{feature.line}</span>
           <span class="cl-card-more" aria-hidden="true">→</span>
@@ -84,8 +85,34 @@
     transition: background-color 150ms ease;
   }
 
+  /* Accent hairline that draws in from the left on hover. */
+  .cl-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: var(--sd-accent);
+    transform: scaleX(0);
+    transform-origin: left;
+    transition: transform 200ms ease;
+  }
+
   .cl-card:hover {
     background: var(--sd-panel);
+  }
+
+  .cl-card:hover::before,
+  .cl-card:focus-visible::before {
+    transform: scaleX(1);
+  }
+
+  .cl-card-num {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    color: var(--sd-muted);
   }
 
   .cl-card-title {

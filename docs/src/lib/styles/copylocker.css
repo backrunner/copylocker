@@ -38,6 +38,152 @@ html:has(.sd-root[data-theme='dark']),
   height: 1.25rem;
 }
 
+/* ---------------------------------------------------------------------------
+ * CopyLocker surface: no blueprint grids. Clean canvas, hairlines, one accent.
+ * The default theme paints a 48px grid on .sd-root (and a drifting grid at the
+ * bottom of reading pages, plus a masked grid over the home hero); replace all
+ * of them with a plain canvas and one soft accent glow.
+ * ------------------------------------------------------------------------ */
+
+.sd-root {
+  background: var(--sd-bg);
+}
+
+.sd-root[data-surface='reading'] {
+  background:
+    radial-gradient(
+      40rem 18rem at 85% -4rem,
+      color-mix(in srgb, var(--sd-accent) 7%, transparent),
+      transparent 70%
+    ),
+    var(--sd-bg);
+}
+
+.sd-root[data-surface='reading']::after,
+.sd-home-hero::before {
+  content: none;
+  display: none;
+}
+
+/* Text selection follows the accent. */
+::selection {
+  background: color-mix(in srgb, var(--sd-accent) 24%, transparent);
+}
+
+/* Topbar: frosted hairline instead of a solid slab. */
+.sd-topbar {
+  background: color-mix(in srgb, var(--sd-bg) 82%, transparent);
+  backdrop-filter: blur(12px) saturate(1.4);
+  -webkit-backdrop-filter: blur(12px) saturate(1.4);
+}
+
+/* Sidebar: quieter groups, accent-rail active item. */
+.sd-sidebar-link {
+  border-radius: calc(var(--sd-radius) - 4px);
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.sd-sidebar-link:hover {
+  background: color-mix(in srgb, var(--sd-ink) 4%, transparent);
+}
+
+.sd-sidebar-link.sd-active,
+.sd-sidebar-link[aria-current='page'] {
+  background: color-mix(in srgb, var(--sd-accent) 9%, transparent);
+  color: var(--sd-accent);
+  font-weight: 550;
+}
+
+/* TOC: accent the tracked heading. */
+.sd-toc-link.sd-active,
+.sd-toc-link[aria-current='true'],
+.sd-toc-link[aria-current='location'] {
+  color: var(--sd-accent);
+}
+
+/* Prose refinements: tighter display headings, calmer links, lighter code chips. */
+.sd-prose h2,
+.sd-prose h3,
+.sd-prose h4 {
+  letter-spacing: -0.015em;
+}
+
+.sd-prose a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+  text-decoration-color: color-mix(in srgb, var(--sd-accent) 45%, transparent);
+  transition:
+    color 120ms ease,
+    text-decoration-color 120ms ease;
+}
+
+.sd-prose a:hover {
+  text-decoration-color: var(--sd-accent);
+}
+
+.sd-prose :not(pre) > code {
+  padding: 0.12em 0.38em;
+  border: 1px solid color-mix(in srgb, var(--sd-accent) 18%, transparent);
+  border-radius: 0.375em;
+  background: color-mix(in srgb, var(--sd-accent) 8%, transparent);
+  font-size: 0.875em;
+}
+
+/* Code blocks: hairline frame, radius, quieter header. */
+.sd-code {
+  border: 1px solid var(--sd-line);
+  border-radius: var(--sd-radius);
+  overflow: hidden;
+}
+
+/* Tables read as hairline ledgers. */
+.sd-prose table {
+  font-size: 0.875rem;
+}
+
+.sd-table-scroll {
+  border: 1px solid var(--sd-line);
+  border-radius: var(--sd-radius);
+}
+
+.sd-prose th {
+  background: color-mix(in srgb, var(--sd-ink) 3%, transparent);
+  font-weight: 600;
+}
+
+/* Footer: hairline top, small muted print. */
+.sd-footer {
+  border-top: 1px solid var(--sd-line);
+  padding: 1.75rem clamp(1.25rem, 4vw, 3rem);
+  font-size: 0.8125rem;
+  color: var(--sd-muted);
+}
+
+.sd-footer a {
+  color: var(--sd-muted);
+  text-decoration: none;
+  transition: color 120ms ease;
+}
+
+.sd-footer a:hover {
+  color: var(--sd-ink);
+}
+
+/* Prev/next pager: hairline cards. */
+.sd-prev-next a {
+  border-radius: var(--sd-radius);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.sd-prev-next a:hover {
+  border-color: color-mix(in srgb, var(--sd-accent) 45%, transparent);
+  background: color-mix(in srgb, var(--sd-accent) 5%, transparent);
+}
+
 /* Callouts (authored as raw HTML blocks in content; markdown pipelines do not
    process markdown inside HTML, so bodies are plain HTML). */
 .sd-prose .cl-callout {
