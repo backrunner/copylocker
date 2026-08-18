@@ -618,7 +618,13 @@ vue 8/8 each, examples build green (electron 5/5, tauri cargo check 333 crates).
   CVE-2026-59870 (node binding lockfile), nanoid GHSA-2v37-7h3g-55p8 (four audited
   lockfiles), and a shared-runner vitest timeout in the 100-way concurrent activation
   test (now 30 s). CI, Native SDK CI (3 platforms), and the Fuzz workflow (dispatch
-  validation) are green on GitHub-hosted runners.
+  validation) were green on GitHub-hosted runners after the initial RSS fix. Scheduled runs
+  31772005801 through 32097579009 then exposed a remaining `fuzz_decode_artifacts` failure:
+  libFuzzer/ASAN reached 2,056 MiB and exited 71 after about eight minutes, with only about
+  25 MiB of live heap and 75 MiB quarantined. The Fuzz workflow now pins nightly-2026-04-27
+  and cargo-fuzz 0.13.2 on pinned Ubuntu 24.04, restarts every 120 s to keep RSS headroom,
+  retries only bounded tool downloads, and uploads failure evidence without allowing a fuzz
+  failure to pass. A hosted rerun after this change remains the authoritative verification.
 - Open-source readiness fixes shipped: README brought to the current state, every
   publishable manifest's repository URL corrected to `github.com/backrunner/copylocker`,
   the workspace homepage points at the GitHub repo (copylocker.dev was unresolving),
