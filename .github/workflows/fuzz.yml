@@ -6,13 +6,21 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
+concurrency:
+  group: fuzz-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
+
+env:
+  FUZZ_TOOLCHAIN: nightly-2026-04-27
+  CARGO_FUZZ_VERSION: 0.13.2
 
 jobs:
   fuzz:
     name: ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 300
     strategy:
       fail-fast: false
@@ -27,24 +35,66 @@ jobs:
           - fuzz_server_validate
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install nightly Rust
-        run: rustup toolchain install nightly --profile minimal
-      - name: Install cargo-fuzz
-        run: cargo +nightly install --locked cargo-fuzz
+      - name: Install pinned nightly Rust
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if timeout 180s rustup toolchain install "$FUZZ_TOOLCHAIN" --profile minimal --no-self-update; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          exit 1
+      - name: Install pinned cargo-fuzz
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if timeout 180s cargo +"$FUZZ_TOOLCHAIN" install --locked cargo-fuzz --version "$CARGO_FUZZ_VERSION"; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 10))
+            fi
+          done
+          exit 1
+      - name: Record fuzz environment
+        run: |
+          {
+            echo "toolchain=$FUZZ_TOOLCHAIN"
+            rustup run "$FUZZ_TOOLCHAIN" rustc --version --verbose
+            cargo +"$FUZZ_TOOLCHAIN" fuzz --version
+          } | tee fuzz-environment.txt
       - name: Fuzz
         working-directory: fuzz
         env:
           FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '14400' || '60' }}
         run: |
-          set -e
-          # Long runs restart the fuzzer process every segment: libFuzzer/ASAN
-          # accrues RSS per exec on large corpora, so one continuous multi-hour
-          # process crosses the default 2048 MB limit and dies with exit 71
-          # even though the targets themselves hold a flat RSS (see agent.md).
-          segment=1800
+          set -euo pipefail
+          # Restart before the known libFuzzer/ASAN RSS ratchet reaches the
+          # runner's default limit. The target keeps its corpus between runs.
+          # The artifact decoder reached ~2 GiB after ~8 minutes on the
+          # hosted Ubuntu runner; 120 s leaves substantial RSS headroom.
+          segment=120
           remaining="$FUZZ_SECONDS"
           while [ "$remaining" -gt 0 ]; do
             step=$(( remaining < segment ? remaining : segment ))
-            cargo +nightly fuzz run ${{ matrix.target }} -- -max_total_time="$step" -max_len=65536
+            cargo +"$FUZZ_TOOLCHAIN" fuzz run ${{ matrix.target }} -- \
+              -max_total_time="$step" -max_len=65536 -timeout=30
             remaining=$(( remaining - step ))
           done
+      - name: Upload fuzz failure evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0 # v7.0.1
+        with:
+          name: fuzz-failure-${{ matrix.target }}-${{ github.run_id }}
+          path: |
+            fuzz-environment.txt
+            fuzz/artifacts/${{ matrix.target }}/
+            fuzz/crash-*
+            fuzz/oom-*
+            fuzz/timeout-*
+            fuzz/leak-*
+          if-no-files-found: ignore
+          retention-days: 14
