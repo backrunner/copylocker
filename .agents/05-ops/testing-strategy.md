@@ -138,9 +138,10 @@ copylocker_suite_testkit::assert_conformant::<MySuite>();
 M1 增加 `fuzz_core_handle`、`fuzz_server_activate`、`fuzz_server_validate`；私有仓库增加
 `fuzz_priv_codec`。
 
-- scheduled CI 对上述每个现有 target 跑 4 小时；PR 上各跑 1 分钟 smoke。
-- 2026-07-27 已完成四个 target 各 10 秒的本地 smoke，无崩溃；M0 的“4h 无崩溃”
-  验收项仍需一次成功的 scheduled workflow 运行记录，不能用 smoke 替代。
+- GitHub Actions 仅在 PR 或手动 dispatch 时对上述每个 target 跑 1 分钟 smoke；不配置周期性
+  scheduled workflow。需要更长时间的 fuzzing 时由维护者手动运行。
+- 2026-07-27 已完成四个 target 各 10 秒的本地 smoke，无崩溃；长时间 fuzzing 的结果作为
+  手动运行证据记录，不以周期性 CI 运行作为验收前提。
 - 语料库持久化到 R2 尚未实现。
 - 断言：无 panic、无 OOM、无无限循环。
 

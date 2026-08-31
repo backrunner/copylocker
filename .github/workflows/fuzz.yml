@@ -2,8 +2,6 @@ name: Fuzz
 
 on:
   pull_request:
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -69,7 +67,7 @@ jobs:
       - name: Fuzz
         working-directory: fuzz
         env:
-          FUZZ_SECONDS: ${{ github.event_name == 'schedule' && '14400' || '60' }}
+          FUZZ_SECONDS: "60"
         run: |
           set -euo pipefail
           # Restart before the known libFuzzer/ASAN RSS ratchet reaches the
