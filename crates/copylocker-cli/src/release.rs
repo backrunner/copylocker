@@ -188,10 +188,25 @@ fn register(args: &ReleaseRegisterArgs) -> Result<Output, CliError> {
         Some(&args.idempotency_key),
     )?;
     let mut output = remote::output("release.register", response);
+    let already_registered = output
+        .json
+        .get("already_registered")
+        .and_then(Value::as_bool)
+        == Some(true);
+    let variant_reused = output.json.get("variant_reused").and_then(Value::as_bool) == Some(true);
+    // The server ignores the submitted seed when returning an existing release or
+    // reusing a stable variant. Never label that unused seed as build material.
+    let seed_accepted = !already_registered && !variant_reused;
     if let Some(object) = output.json.as_object_mut() {
-        object.insert("variant_seed_hex".to_owned(), json!(variant_seed_hex));
-        object.insert("variant_seed_shown_once".to_owned(), json!(true));
-        object.insert("variant_seed_generated".to_owned(), json!(generated));
+        if seed_accepted {
+            object.insert("variant_seed_hex".to_owned(), json!(variant_seed_hex));
+            object.insert("variant_seed_generated".to_owned(), json!(generated));
+        }
+        object.insert("variant_seed_shown_once".to_owned(), json!(seed_accepted));
+        object.insert(
+            "variant_seed_required_from_existing_build".to_owned(),
+            json!(!seed_accepted),
+        );
     }
     let release = output.json.get("release").cloned().unwrap_or(Value::Null);
     let release_id = release
@@ -206,19 +221,17 @@ fn register(args: &ReleaseRegisterArgs) -> Result<Output, CliError> {
         "registered release {release_id} ({} {}, channel {})\nvariant_id: {variant_id}",
         product, args.app_version, args.channel
     );
-    if output.json.get("variant_reused").and_then(Value::as_bool) == Some(true) {
+    if variant_reused {
         human.push_str("\nvariant reused from the product's first active release (variant_stable)");
-    } else {
+    }
+    if seed_accepted {
         human.push_str(&format!(
             "\nvariant seed (shown once, embed it in the build as variant_const): {variant_seed_hex}"
         ));
+    } else {
+        human.push_str("\nreuse the original variant_const from the existing build; the submitted seed was not adopted");
     }
-    if output
-        .json
-        .get("already_registered")
-        .and_then(Value::as_bool)
-        == Some(true)
-    {
+    if already_registered {
         human.push_str("\nthis build was already registered; returning the existing release");
     }
     human.push_str(&warnings_text(&output.json));

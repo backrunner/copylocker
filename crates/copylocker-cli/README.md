@@ -118,6 +118,16 @@ doctor --check-api
 
 Typical mutations require an explicit idempotency key:
 
+Release registration prints `variant_seed_hex` only when the server adopts the submitted
+seed for a new variant. Re-registering an existing build or reusing a `variant_stable`
+variant requires the original build's `variant_const`; the CLI omits the unused seed
+and sets `variant_seed_required_from_existing_build: true` in JSON output. Preserve
+the original seed in the build pipeline's secret storage.
+
+Concurrent release registrations or lifecycle changes can return
+`concurrent_modification` (409). Reload the release state before retrying. The rejected
+transaction leaves neither a release mutation nor a successful operation journal.
+
 ```bash
 copylocker catalog push --project server \
   --file server/catalog.json \

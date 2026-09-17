@@ -637,6 +637,67 @@ fn release_register_generates_a_seed_when_omitted() {
 }
 
 #[test]
+fn release_register_never_reports_an_unused_seed_as_build_material() {
+    let root = temporary_dir("release-existing-seed");
+    fs::create_dir_all(&root).expect("create test directory");
+    for already_registered in [true, false] {
+        for json in [true, false] {
+            let mut response = serde_json::json!({
+                "ok": true,
+                "already_registered": already_registered,
+                "release": {"id": "rel_existing", "variant_id": 1}
+            });
+            if !already_registered {
+                response["variant_reused"] = Value::Bool(true);
+            }
+            let (url, server) = spawn_mock(vec![json_response(
+                if already_registered {
+                    "200 OK"
+                } else {
+                    "201 Created"
+                },
+                response,
+            )]);
+            let mut args = vec![
+                "release",
+                "register",
+                "--api-url",
+                &url,
+                "--product",
+                "acme",
+                "--app-version",
+                "2.0.0",
+                "--build-fingerprint",
+                "existing-build",
+                "--idempotency-key",
+                "release-existing-seed",
+            ];
+            if json {
+                args.insert(0, "--json");
+            }
+            let output = run_remote_str(&root, &args);
+            assert_success(&output);
+            let requests = server.join().expect("join mock server");
+            let body: Value = serde_json::from_slice(&requests[0].body).expect("request JSON");
+            let unused_seed = body["variant_seed_hex"].as_str().expect("submitted seed");
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(!stdout.contains(unused_seed));
+            if json {
+                let result = json_stdout(&output);
+                assert!(result.get("variant_seed_hex").is_none());
+                assert!(result.get("variant_seed_generated").is_none());
+                assert_eq!(result["variant_seed_shown_once"], false);
+                assert_eq!(result["variant_seed_required_from_existing_build"], true);
+            } else {
+                assert!(stdout.contains("reuse the original variant_const"));
+                assert!(!stdout.contains("embed it in the build"));
+            }
+        }
+    }
+    fs::remove_dir_all(root).expect("remove test directory");
+}
+
+#[test]
 fn release_lifecycle_dry_run_then_confirm_and_revoke_acknowledgement() {
     let root = temporary_dir("release-lifecycle");
     fs::create_dir_all(&root).expect("create test directory");

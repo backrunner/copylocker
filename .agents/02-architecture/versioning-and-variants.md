@@ -49,6 +49,15 @@ $ copylocker release register \
 **这一步是 CI 的强门禁**：未注册的 release_id 在服务端不存在 → 该版本的客户端无法激活。
 错误信息必须明确（`RELEASE_NOT_REGISTERED`，并给出注册命令）。
 
+实现约束：同一产品的注册、弃用与标记泄露操作共享 `release_registry` 乐观版本锁，
+使用现有 `admin_entity_versions` 表。必须先读取版本，再读取 release 状态与计算变体；
+版本记录、业务写入和操作日志在同一 D1 batch 内提交。竞争失败返回 409
+`concurrent_modification`，整批回滚，调用者重新读取状态后重试。此约束也覆盖
+`variant_stable` 的首次并发注册，避免多个请求各自创建不同的初始变体。
+
+重复注册与复用稳定变体时，服务端不会采用请求中的新种子。CLI 此时不输出该种子作为
+构建参数，构建必须沿用原始 `variant_const`。
+
 ### 2.2 variant_seed 的派生
 
 ```
