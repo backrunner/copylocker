@@ -521,14 +521,17 @@ export class CopyLocker {
     if (this.nextCheckAt > 0 && now >= this.nextCheckAt) {
       this.validateInBackground()
     }
-    // The same fail-closed integrity gate as unseal(): when the build requires
-    // the guard's proof (`requireIntegrityProof`), a missing R kills the KEK
-    // path too — deleting the guard cannot turn loadSealed into an oracle.
-    await resolveManifestRoot(
+    // This path uses the registered asset KEK, not the two-stage FinalKey.
+    // Merely resolving R does not bind it to that key: reject a mismatched
+    // computed root explicitly before requesting key material or asset bytes.
+    const manifestRoot = await resolveManifestRoot(
       this.integrity,
       this.constants.manifestRoot,
       this.requireIntegrityProof,
     )
+    if (!bytesEqual(manifestRoot, this.constants.manifestRoot)) {
+      throw errorFromCode(ERR_DERIVATION)
+    }
     const kek = await this.unwrapAssetKek(featureId, now)
     const response = await fetchFn(url)
     if (!response.ok) throw new TransportError(response.status, 'CopyLocker: asset fetch failed')

@@ -27,6 +27,7 @@ function fetchWithAsset(log: string[], sealed: Uint8Array | null): typeof fetch 
   return (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith('/presets.json.sealed')) {
+      log.push(url)
       if (sealed === null) return new Response('not found', { status: 404 })
       return new Response(sealed as unknown as ArrayBuffer, {
         status: 200,
@@ -114,5 +115,41 @@ describe('CopyLocker.loadSealed (@copylocker/seal KEK path)', () => {
     expect(fx.fetchLog.some((entry) => entry.includes('/presets.json.sealed'))).toBe(false)
     expect(fx.driver.ops).not.toContain(13)
     cl.dispose()
+  })
+
+  it.each([false, true])('rejects a mismatched guard root before unwrapping or fetching (required=%s)', async (required) => {
+    const fx = fixture(['pro'])
+    const expectedRoot = new Uint8Array(32).fill(0x41)
+    const cl = await makeClient(fx, await sealAsset(fx.driver.kek, meta, plaintext), {
+      buildConstants: { manifestRoot: expectedRoot },
+      integrity: { manifestRoot: () => new Uint8Array(32).fill(0x42) },
+      requireIntegrityProof: required,
+    })
+    try {
+      await cl.activate('CL-TEST-KEY')
+      await expect(cl.loadSealed('/presets.json.sealed', 'pro')).rejects.toMatchObject({
+        name: 'NotEntitledError', code: 17,
+      })
+      expect(fx.driver.ops).not.toContain(13)
+      expect(fx.fetchLog.some((entry) => entry.includes('/presets.json.sealed'))).toBe(false)
+    } finally {
+      cl.dispose()
+    }
+  })
+
+  it('opens the KEK asset when the computed root matches the build root', async () => {
+    const fx = fixture(['pro'])
+    const root = new Uint8Array(32).fill(0x41)
+    const cl = await makeClient(fx, await sealAsset(fx.driver.kek, meta, plaintext), {
+      buildConstants: { manifestRoot: root },
+      integrity: { manifestRoot: () => root.slice() },
+      requireIntegrityProof: true,
+    })
+    try {
+      await cl.activate('CL-TEST-KEY')
+      await expect(cl.loadSealed('/presets.json.sealed', 'pro')).resolves.toEqual(plaintext)
+    } finally {
+      cl.dispose()
+    }
   })
 })

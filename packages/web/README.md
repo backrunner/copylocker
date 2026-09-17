@@ -206,7 +206,14 @@ Optionally, `CopyLockerOptions.integrity.manifestRoot` wires in the M4
 (the value published by the unplugin bootstrap as `__CL_GUARD_R__`) replaces
 the injected constant during key derivation. `R` is not a boolean — a
 tampered or partially-missing bundle simply computes a different root,
-derives a different `FinalKey`, and sealed assets fail to open.
+derives a different `FinalKey`, and assets opened through `unseal()` fail to open.
+
+`loadSealed()` uses the server-registered asset KEK instead of `FinalKey`. It compares
+the computed `R` with the injected (or explicitly configured) manifest root before
+unwrapping the KEK or fetching the asset; a mismatch fails with code 17. This is a
+client-side integrity check, not an additional cryptographic binding of `R` into the
+registered KEK. Its authorization security still comes from the credential and KEK
+wrapping chain. Both paths require `requireIntegrityProof` to reject a missing guard.
 
 ```ts
 const cl = await CopyLocker.create({
