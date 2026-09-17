@@ -1,6 +1,6 @@
 # CopyLocker Agent Context
 
-Last updated: 2026-07-30
+Last updated: 2026-09-17
 
 ## Purpose
 
@@ -47,6 +47,70 @@ repository boundary, accepted risk, or immediate plan.
 | M6 analytics and telemetry | Implemented locally | Proof-covered-telemetry bug fixed (wasm `build-validate-request` op injects the `TelemetryBlock` before signing; `@copylocker/web` `attachTelemetry` removed); `@copylocker/telemetry` (34 tests); server pipeline (tier gate, consent=0 drop, poisoning clamps with counters, pepper-derived machine keys, R2 detail archive, idempotent D1 rollup on cron `15 0 * * *`); 4 admin analytics endpoints under `analytics:r` with `meta.source/error_pct/suppressed_buckets/warning`; DSR export/delete + telemetry purge under new `dsr:rw` scope with CLI `dsr export|delete` / `telemetry purge`; legal-sync CI gate; all seven acceptance criteria test-covered. Analytics Engine leg and subscription delivery remain pending (see the M6 evidence) |
 | M7 admin console | Implemented locally | `apps/console` SvelteKit (52 tests + svelte-check clean) fully on `packages/admin-sdk` (76 tests, every admin route incl. machines/audit, dry-run discipline, 4 MiB cap); ts-rs drift-check CI (26 wire types); Simulator three-way consistency locked; offline activation portal; worker global endpoints (`GET /v1/admin/machines`, `GET /v1/admin/audit`, `POST /v1/admin/audit/verify`, `DELETE /v1/admin/machines/:id` GDPR alias) under `machines:r`/`audit:r`; releases/analytics/audit/settings pages with two-step parity (typed-id + dry-run impact preview); hermetic Playwright E2E 16/16 (issue → activate → revoke → enforce, axe zero critical/serious on all pages, keyboard-only flows) |
 | M8 GA | Partially prepared | `SECURITY.md` with the honest residual-risk statement, `.github/workflows/release.yml` (reproducible WASM double-build verified locally, SBOM, Sigstore keyless provenance), VitePress docs site with operations guides and a Pages deploy workflow, and the legal template pack exist. External audit, red team, legal review, npm publication, and production operations remain external-party items |
+
+## Architecture Review and Repairs (2026-09-17)
+
+Reviewed the public threat model, release/variant and KEK contracts, Admin authentication,
+revocation/recovery boundaries, and Web integrity path against the implemented code. Four
+concrete defects were repaired locally:
+
+- Concurrent release registrations could allocate the same `MAX(variant_id)+1`; concurrent
+  first registrations under `variant_stable` could also choose different initial seeds.
+  Registration and lifecycle transitions now share a product-scoped optimistic lock using
+  the existing immutable `admin_entity_versions` table. The lock is read before release state
+  and committed with the release mutation and journal. A conflict rolls the whole batch back
+  and returns 409 `concurrent_modification`; no migration is required.
+- Concurrent release transitions could report and journal success after their conditional
+  UPDATE changed no row (for example, a competing warn/revoke). The same registry lock makes
+  only a transition based on the current release snapshot commit. Regression coverage checks
+  the winning state, journal count, and byte-equivalent idempotent replay.
+- CLI registration always presented its submitted seed as `variant_const`, even when the
+  server returned an existing release or reused a stable variant. Both JSON and human output
+  now omit that unused seed and direct the build to retain its original variant constant.
+- Web `loadSealed()` resolved the guard root but discarded its value, so a mismatched root
+  still opened a KEK-sealed asset. It now compares the computed and configured build roots
+  before unwrapping/fetching. Negative tests failed before the repair and pass afterwards;
+  a matching-root control succeeds. The README distinguishes this client-side check from
+  `unseal()`'s productive two-stage key derivation; it does not claim that the registered KEK
+  cryptographically incorporates the runtime root.
+
+The dependency review also repaired current release-gate failures: `rustls` is now 0.23.45
+(RUSTSEC-2026-0285), and the yanked `chacha20` 0.10.1 is replaced by 0.10.2 in the public
+workspace and affected standalone example/helper lockfiles. npm fixes include Vitest 4.1.11,
+Next.js 16.3.5, and patched sharp, undici, cookie, js-yaml, nanoid, fast-uri, xmldom, and
+esbuild dependencies. All 21 public npm lockfile projects now audit without vulnerabilities;
+`cargo deny --locked check advisories bans licenses sources` and `cargo audit --deny warnings`
+pass. Existing permitted duplicate-crate warnings remain; no new advisory exception was added.
+
+Narrow dependency overrides keep the existing compatible toolchain: Miniflare's sharp/undici,
+SvelteKit's old cookie dependency, and tsup's esbuild dependency use patched versions. Remove
+these overrides when compatible upstream releases require those fixed versions themselves.
+The server template carries the Worker overrides so newly scaffolded installs get the same
+protection. The docs framework remains pinned to svedocs/svedocs-cli 0.1.0.
+
+Local validation: workspace fmt/check/Clippy and 695 tests passed (one existing ignored
+doctest); ML-DSA 44/65/87 each passed 60 tests. Worker TypeScript + 101 workerd tests,
+11 SDK package checks/builds + 438 tests (including Web's 105), console check/build + 61 tests,
+architecture/legal-sync, and server-template/package checks passed. Docs check/edge build and
+strict content validation passed (22 pages, zero errors/warnings). The macOS Node-API release
+build and three tests passed; the Tauri example renderer/host checks and Electron's five
+security tests plus ASAR/fuse packaging passed. These are local results, not a new hosted
+three-platform run or an independent security audit.
+
+Worker WASM is 1,206,312 gzip bytes (1,500,000 limit); 20-sample local startup p95 is
+12.551 ms (50 ms limit). Its npm tarball is 1,221,516 packed bytes and passed content checks.
+Web E2E ports are now configurable so existing local development servers need not be stopped.
+The complete Web and console E2E suites passed against the real local Worker backend
+(22 and 16 tests respectively), including strict CSP Worker isolation, cross-browser guard
+consistency, offline/recovery flows, and issue/activate/revoke/enforce. An earlier Web run
+hit a transient `ERR_ADDRESS_INVALID`; the unchanged focused case and full suite both passed
+on rerun.
+
+ADR-0014 intentionally retains `stale_chain_head` protection: simultaneous successful
+business commits can require an idempotent retry while an earlier audit event is being
+mirrored. Tests exercise that recovery rather than relaxing audit ordering. Existing private
+submodule changes are excluded from these public review commits; no private source, migration,
+deployment, publication, or production mutation is part of this review.
 
 ## Last Verified Release Baseline
 
@@ -598,11 +662,9 @@ vue 8/8 each, examples build green (electron 5/5, tauri cargo check 333 crates).
    production operations stay pending-external. The live queue byte-array mangling flagged
    by M7-C is fixed (see the M7-C evidence); the DO outbox flush timing under `wrangler
    dev` remains a documented local-dev limitation.
-7. Review follow-ups accepted as non-blocking (from the post-M8 adversarial review): the
-   worker `releases.rs` variant-id allocation reads `MAX+1` outside the register transaction,
-   so two concurrent same-product registrations can collide and corrupt the sibling→variant
-   KEK mapping; a proper fix needs an atomic counter or schema change and the variant-id
-   sequence asserted by tests (admin-only, low probability). `@copylocker/web` permits manual
+7. The post-M8 concurrent variant allocation follow-up is closed by the 2026-09-17 review
+   above using the existing immutable entity-version history. Remaining follow-ups:
+   `@copylocker/web` permits manual
    ops after `dispose()` (background paths are `stopped`-gated; the wrappers unsubscribe, so
    only direct consumers are affected) — a design decision to revisit if misuse is reported.
    A mid-session web Worker respawn is a feature, not a bug fix. Unplugin's guarded-marker
