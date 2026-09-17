@@ -5869,6 +5869,89 @@ describe("worker runtime", () => {
     );
   });
 
+  it.each([false, true])("keeps concurrent release variants consistent (stable=%s)", async (stable) => {
+    const product = stable ? "product_rel_stable_race" : "product_rel_race";
+    await seedReleaseAdminProduct(product);
+    if (stable) {
+      await env.DB.prepare(
+        "INSERT INTO policies(id, product_id, name, entitlement_json, validity_json, \
+         version_scope_json, seats, mode, refresh_after_sec, grace_seconds, \
+         offline_upgrade_policy, created_at, updated_at) \
+         VALUES (?, ?, 'Policy', '{}', '{}', '{}', 3, 0, 3600, 3600, 'variant_stable', 1, 1)",
+      ).bind(`${product}_policy`, product).run();
+    }
+    const token = testAdminToken(stable ? 116 : 114);
+    await seedAdminToken(token, ["releases:rw"]);
+    const bodies = Array.from({ length: 8 }, (_, index) => ({
+      product_id: product,
+      app_version: `1.0.${index}`,
+      build_fingerprint: `${product}-build-${index}`,
+      channel: "stable",
+      variant_seed_hex: (index + 1).toString(16).padStart(2, "0").repeat(32),
+    }));
+    const responses = await Promise.all(bodies.map((body, index) =>
+      adminJson("/releases", "POST", token, body, `${product}-${index}`),
+    ));
+    const variants: number[] = [];
+    for (let index = 0; index < responses.length; index++) {
+      let response = responses[index];
+      expect([201, 409, 500]).toContain(response.status);
+      if (response.status === 409) {
+        expect(await response.json()).toMatchObject({ error: { code: "concurrent_modification" } });
+        // A failed optimistic write must leave no successful journal to replay.
+        response = await adminJson("/releases", "POST", token, bodies[index], `${product}-${index}`);
+      } else if (response.status === 500) {
+        // ADR-0014 refuses to advance past an unmirrored audit event. A concurrent
+        // finalization can therefore need an idempotent retry after the first wave.
+        response = await adminJson("/releases", "POST", token, bodies[index], `${product}-${index}`);
+      }
+      expect(response.status).toBe(201);
+      const result = await response.json<{ release: { variant_id: number } }>();
+      variants.push(result.release.variant_id);
+    }
+    expect(variants.sort((a, b) => a - b)).toEqual(stable ? Array(8).fill(1) : [1, 2, 3, 4, 5, 6, 7, 8]);
+    const rows = await env.DB.prepare(
+      "SELECT variant_id FROM releases WHERE product_id = ? ORDER BY variant_id",
+    ).bind(product).all<{ variant_id: number }>();
+    expect(rows.results.map((row) => row.variant_id)).toEqual(variants);
+  });
+
+  it("journals only the winning concurrent release transition", async () => {
+    const product = "product_rel_transition_race";
+    await seedReleaseAdminProduct(product);
+    const token = testAdminToken(115);
+    await seedAdminToken(token, ["releases:rw"]);
+    const registered = await adminJson("/releases", "POST", token, {
+      product_id: product,
+      app_version: "1.0.0",
+      build_fingerprint: "build-race",
+      channel: "stable",
+      variant_seed_hex: "ab".repeat(32),
+    }, "transition-race-register");
+    expect(registered.status).toBe(201);
+    const { release } = await registered.json<{ release: { id: string } }>();
+    const path = `/releases/${release.id}/mark-compromised?product_id=${product}&dry_run=false`;
+    const bodies = ["warn", "force_upgrade", "revoke"].map((action) => ({
+      action, acknowledge_revoke: true,
+    }));
+    const responses = await Promise.all(bodies.map((body, index) =>
+      adminJson(path, "POST", token, body, `transition-race-${index}`),
+    ));
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409, 409]);
+    const winner = responses.findIndex((response) => response.status === 200);
+    const successful = await responses[winner].json();
+    expect(await (await adminJson(path, "POST", token, bodies[winner], `transition-race-${winner}`)).json())
+      .toEqual(successful);
+    const journals = await env.DB.prepare(
+      "SELECT after_json FROM admin_operations WHERE source_id = ? AND action = 'release:mark-compromised'",
+    ).bind(release.id).all<{ after_json: string }>();
+    expect(journals.results).toHaveLength(1);
+    expect(JSON.parse(journals.results[0].after_json).compromised_action).toBe(bodies[winner].action);
+    const row = await env.DB.prepare("SELECT compromised_action FROM releases WHERE id = ?")
+      .bind(release.id).first<{ compromised_action: string }>();
+    expect(row?.compromised_action).toBe(bodies[winner].action);
+  });
+
   it("deprecates a release after a dry-run impact report", async () => {
     const { licenseId } = licenseObject(2_220);
     const licenseKey = testLicenseKey(30);

@@ -23,6 +23,7 @@ use crate::bindings::authorization::{self, VariantParams};
 use crate::bindings::rng::WorkerRng;
 
 const SEVEN_DAYS_SECS: i64 = 7 * 24 * 60 * 60;
+const REGISTRY_ENTITY_KIND: &str = "release_registry";
 const RELEASE_SELECT: &str =
     "SELECT id, product_id, app_version, variant_id, variant_params, build_fingerprint, \
             manifest_root, channel, status, compromised_action, published_at, deprecated_at, \
@@ -192,6 +193,12 @@ async fn register(
         return not_found("product not found");
     }
 
+    // Read the optimistic-lock version BEFORE any release state. The unique history
+    // entry commits in the same batch as the release and journal, so concurrent
+    // MAX+1 allocations (including a variant_stable product's first release) cannot
+    // both succeed. Lifecycle transitions share this lock to protect stable sources.
+    let registry_version = registry_version(&database, &body.product_id).await?;
+
     // Re-registering the same build is idempotent even under a fresh Idempotency-Key:
     // the release identity is the (product, build fingerprint) pair.
     if let Some(existing) =
@@ -350,6 +357,7 @@ async fn register(
     };
     let statements = vec![
         admin_operations::insert_statement(&database, &operation)?,
+        registry_version_statement(&database, &operation, &body.product_id, registry_version)?,
         database
             .prepare(
                 "INSERT INTO releases(\
@@ -390,6 +398,9 @@ async fn register(
         .await?
         {
             return Ok(response);
+        }
+        if self::registry_version(&database, &body.product_id).await? != registry_version {
+            return registry_conflict();
         }
         return Err(error);
     }
@@ -659,6 +670,7 @@ async fn mark_compromised(request: &mut Request, env: &Env, release_id: &str) ->
 struct TransitionContext {
     principal: AdminPrincipal,
     database: D1Database,
+    registry_version: i64,
     release: ReleaseRow,
     dry_run: bool,
 }
@@ -685,12 +697,14 @@ async fn transition_context(
     if !product_owned(&database, &product_id, &principal.vendor_id).await? {
         return not_found("product not found").map(Err);
     }
+    let registry_version = registry_version(&database, &product_id).await?;
     let Some(release) = load_release(&database, release_id, &product_id).await? else {
         return not_found("release not found").map(Err);
     };
     Ok(Ok(TransitionContext {
         principal,
         database,
+        registry_version,
         release,
         dry_run,
     }))
@@ -764,10 +778,15 @@ async fn finish_transition(
         side_effect: None,
         created_at: now,
     };
-    let mut statements = vec![admin_operations::insert_statement(
-        &context.database,
-        &operation,
-    )?];
+    let mut statements = vec![
+        admin_operations::insert_statement(&context.database, &operation)?,
+        registry_version_statement(
+            &context.database,
+            &operation,
+            &context.release.product_id,
+            context.registry_version,
+        )?,
+    ];
     statements.extend(mutations);
     if let Err(error) = context.database.batch(statements).await {
         if let Some(response) = replay_operation(
@@ -782,9 +801,44 @@ async fn finish_transition(
         {
             return Ok(response);
         }
+        if registry_version(&context.database, &context.release.product_id).await?
+            != context.registry_version
+        {
+            return registry_conflict();
+        }
         return Err(error);
     }
     finish_new_operation(env, &context.database, &context.principal, &request_id).await
+}
+
+async fn registry_version(database: &D1Database, product_id: &str) -> Result<i64> {
+    admin_operations::current_entity_version(database, REGISTRY_ENTITY_KIND, product_id).await
+}
+
+fn registry_version_statement(
+    database: &D1Database,
+    operation: &NewOperation,
+    product_id: &str,
+    previous_version: i64,
+) -> Result<worker::D1PreparedStatement> {
+    let next_version = previous_version.checked_add(1).ok_or_else(|| {
+        worker::Error::RustError("release registry version is exhausted".to_owned())
+    })?;
+    admin_operations::version_statement(
+        database,
+        &operation.operation_id(),
+        REGISTRY_ENTITY_KIND,
+        product_id,
+        next_version,
+        operation.created_at,
+    )
+}
+
+fn registry_conflict() -> Result<Response> {
+    conflict(
+        "concurrent_modification",
+        "the release registry changed; reload it and retry with a new Idempotency-Key",
+    )
 }
 
 fn action_effects(action: CompromisedAction) -> Vec<&'static str> {
