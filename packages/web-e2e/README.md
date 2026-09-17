@@ -14,6 +14,9 @@ npx playwright install chromium firefox webkit   # once; installs into the user 
 npm run test:e2e                  # full run (backend attempted)
 CL_E2E_BACKEND=0 npm run test:e2e # deterministic no-backend tier only
 npm run test:e2e -- --grep attack # extra args are forwarded to playwright
+
+# Use separate ports when local development servers already occupy the defaults.
+CL_E2E_VITE_PORT=14173 CL_E2E_NEXT_PORT=13000 CL_E2E_BACKEND_PORT=18788 npm run test:e2e
 ```
 
 Firefox and WebKit are required: the default run executes the multi-engine

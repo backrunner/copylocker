@@ -6,8 +6,16 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const repoRoot = path.resolve(here, '../..')
 const outputRoot = path.join(repoRoot, 'output', 'playwright')
 
-const vitePort = 4173
-const nextPort = 3000
+function port(name: string, fallback: number): number {
+  const value = Number(process.env[name] ?? fallback)
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error(`${name} must be a TCP port between 1 and 65535`)
+  }
+  return value
+}
+
+const vitePort = port('CL_E2E_VITE_PORT', 4173)
+const nextPort = port('CL_E2E_NEXT_PORT', 3000)
 
 export default defineConfig({
   testDir: './e2e',
@@ -64,14 +72,14 @@ export default defineConfig({
   ],
   webServer: [
     {
-      command: 'npm run preview',
+      command: `npm run preview -- --port ${vitePort} --strictPort`,
       cwd: path.join(repoRoot, 'examples', 'vite-spa'),
       port: vitePort,
       reuseExistingServer: false,
       timeout: 60_000,
     },
     {
-      command: 'npm start',
+      command: `npm start -- --port ${nextPort}`,
       cwd: path.join(repoRoot, 'examples', 'nextjs-app'),
       port: nextPort,
       reuseExistingServer: false,
