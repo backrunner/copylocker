@@ -24,6 +24,10 @@
     "vite": "^8.0.13",
     "wrangler": "^4.92.0"
   },
+  "overrides": {
+    "cookie@<0.7.0": "0.7.2",
+    "sharp": "0.35.4"
+  },
   "devDependencies": {
     "@types/node": "^25.8.0",
     "svedocs-cli": "0.1.0",

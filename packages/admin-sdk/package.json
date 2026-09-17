@@ -23,10 +23,15 @@
     "test": "vitest run",
     "prepack": "npm run build && npm test"
   },
+  "overrides": {
+    "tsup": {
+      "esbuild": "0.28.1"
+    }
+  },
   "devDependencies": {
     "tsup": "8.5.1",
     "typescript": "7.0.2",
-    "vitest": "4.1.10"
+    "vitest": "4.1.11"
   },
   "license": "GPL-3.0-only",
   "repository": {
